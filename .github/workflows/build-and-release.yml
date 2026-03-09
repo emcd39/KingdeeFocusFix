@@ -43,8 +43,6 @@ jobs:
           mkdir -p release
           copy "HookDll\x64\Release\HookDll.dll" "release\"
           copy "FixApp\bin\Release\net48\KingdeeFocusFix.exe" "release\"
-          copy "README.md" "release\"
-          copy "LICENSE" "release\" 2>$null || echo "No LICENSE file"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -86,7 +84,6 @@ jobs:
             ### 文件说明
             - `KingdeeFocusFix.exe` - 主程序（托盘应用）
             - `HookDll.dll` - CBT 钩子 DLL
-            - `README.md` - 详细说明文档
 
             ### 系统要求
             - Windows 10 / Windows 11 (x64)
