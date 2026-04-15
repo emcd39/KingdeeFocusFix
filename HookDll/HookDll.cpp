@@ -33,7 +33,8 @@ static bool IsKDSReport(HWND hwnd)
                 for (i = 0; pe.szExeFile[i]; i++)
                     name[i] = (wchar_t)towlower(pe.szExeFile[i]);
                 name[i] = 0;
-                found = (wcscmp(name, L"kingdee.bos.kdsreport.exe") == 0);
+                found = (wcscmp(name, L"kingdee.bos.kdsreport.exe") == 0)
+                     || (wcscmp(name, L"enterpriseportal.exe") == 0);
                 break;
             }
         } while (Process32NextW(snap, &pe));
