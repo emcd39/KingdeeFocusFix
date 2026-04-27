@@ -359,21 +359,66 @@ static bool IsKingdeeReport(HWND hwnd) {
     return found;
 }
 
+// 检查目标窗口是否属于用友进程
+static bool IsYonyouWindow(HWND hwnd) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid) return false;
+
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+    bool found = false;
+
+    if (Process32FirstW(hSnap, &pe)) {
+        do {
+            if (pe.th32ProcessID == pid) {
+                wchar_t name[MAX_PATH];
+                int i = 0;
+                for (i = 0; pe.szExeFile[i]; i++)
+                    name[i] = (wchar_t)towlower(pe.szExeFile[i]);
+                name[i] = 0;
+                found = (wcscmp(name, L"enterpriseportal.exe") == 0);
+                break;
+            }
+        } while (Process32NextW(hSnap, &pe));
+    }
+    CloseHandle(hSnap);
+    return found;
+}
+
+// 检查共享内存中 Alt 是否在最近 N ms 内被按下过（用于 CBT 钩子）
+static bool WasAltRecentlyPressedCBT() {
+    if (!g_pShared) return false;
+    DWORD pressTime = g_pShared->altPressTime;
+    if (pressTime == 0) return false;
+    DWORD now = GetTickCount();
+    DWORD elapsed = now - pressTime;
+    return elapsed < ALT_BLOCK_WINDOW_MS;
+}
+
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
         HWND hwnd = (HWND)wParam;
         bool altDown = IsAltDown();
         bool isKingdee = IsKingdeeReport(hwnd);
-        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d\n", hwnd, altDown, isKingdee);
+        bool isYonyou = IsYonyouWindow(hwnd);
+        bool altRecent = WasAltRecentlyPressedCBT();
 
-        // 记录 Alt 按下的时间戳（用于用友的延迟焦点抢占）
+        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d\n",
+            hwnd, altDown, isKingdee, isYonyou, altRecent);
+
+        // 记录 Alt 按下的时间戳
         if (altDown) {
             RecordAltPress();
             Log("[CbtProc] Alt pressed, recorded timestamp\n");
         }
 
-        if (altDown && isKingdee) {
-            Log("[CbtProc] BLOCKED Kingdee!\n");
+        // 阻止金蝶或用友在 Alt+Tab 期间激活窗口
+        if ((altDown || altRecent) && (isKingdee || isYonyou)) {
+            Log("[CbtProc] BLOCKED! isKingdee=%d, isYonyou=%d\n", isKingdee, isYonyou);
             return 1;
         }
     }
