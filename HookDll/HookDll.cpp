@@ -114,6 +114,9 @@ typedef BOOL(WINAPI* pSetForegroundWindow)(HWND);
 typedef BOOL(WINAPI* pSetWindowPos)(HWND, HWND, int, int, int, int, UINT);
 typedef HWND(WINAPI* pSetFocus)(HWND);
 typedef HWND(WINAPI* pSetActiveWindow)(HWND);
+typedef void (WINAPI* pSwitchToThisWindow)(HWND, BOOL);
+typedef BOOL(WINAPI* pShowWindow)(HWND, int);
+typedef BOOL(WINAPI* pMoveWindow)(HWND, int, int, int, int, BOOL);
 
 static pAttachThreadInput fpAttachThreadInput = nullptr;
 static pBringWindowToTop fpBringWindowToTop = nullptr;
@@ -121,6 +124,9 @@ static pSetForegroundWindow fpSetForegroundWindow = nullptr;
 static pSetWindowPos fpSetWindowPos = nullptr;
 static pSetFocus fpSetFocus = nullptr;
 static pSetActiveWindow fpSetActiveWindow = nullptr;
+static pSwitchToThisWindow fpSwitchToThisWindow = nullptr;
+static pShowWindow fpShowWindow = nullptr;
+static pMoveWindow fpMoveWindow = nullptr;
 
 static bool g_isYonyou = false;
 
@@ -212,6 +218,39 @@ static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
     return fpSetActiveWindow(hWnd);
 }
 
+// SwitchToThisWindow - 关键！用友通过这个 API 绕过我们的 Hook
+static void WINAPI Detour_SwitchToThisWindow(HWND hwnd, BOOL fAltTab) {
+    bool block = ShouldBlock();
+    Log("[SwitchToThisWindow] hwnd=%p, fAltTab=%d, block=%d\n", hwnd, fAltTab, block);
+    if (block) {
+        Log("[SwitchToThisWindow] BLOCKED!\n");
+        return;
+    }
+    fpSwitchToThisWindow(hwnd, fAltTab);
+}
+
+// ShowWindow - 可能用于激活窗口
+static BOOL WINAPI Detour_ShowWindow(HWND hWnd, int nCmdShow) {
+    bool block = ShouldBlock();
+    Log("[ShowWindow] hWnd=%p, nCmdShow=%d, block=%d\n", hWnd, nCmdShow, block);
+    if (block && (nCmdShow == SW_SHOW || nCmdShow == SW_RESTORE || nCmdShow == SW_SHOWNA)) {
+        Log("[ShowWindow] BLOCKED!\n");
+        return FALSE;
+    }
+    return fpShowWindow(hWnd, nCmdShow);
+}
+
+// MoveWindow - 可能用于激活窗口
+static BOOL WINAPI Detour_MoveWindow(HWND hWnd, int X, int Y, int nWidth, int nHeight, BOOL bRepaint) {
+    bool block = ShouldBlock();
+    Log("[MoveWindow] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
+        Log("[MoveWindow] BLOCKED!\n");
+        return FALSE;
+    }
+    return fpMoveWindow(hWnd, X, Y, nWidth, nHeight, bRepaint);
+}
+
 static void InstallMinHookIfYonyou() {
     Log("[DllMain] DLL loaded in process: %s\n", GetCurrentProcessName().c_str());
 
@@ -253,6 +292,31 @@ static void InstallMinHookIfYonyou() {
     MH_CreateHookApi(L"user32.dll", "SetActiveWindow",
         &Detour_SetActiveWindow, (LPVOID*)&fpSetActiveWindow);
     Log("[DllMain] Hook SetActiveWindow: %p\n", fpSetActiveWindow);
+
+    // SwitchToThisWindow - 关键！用友通过这个 API 绕过我们的 Hook
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+    if (hUser32) {
+        // 尝试通过名字获取
+        fpSwitchToThisWindow = (pSwitchToThisWindow)GetProcAddress(hUser32, "SwitchToThisWindow");
+        if (!fpSwitchToThisWindow) {
+            // 尝试通过 ordinal 获取（常见 ordinal: 0x5E9）
+            fpSwitchToThisWindow = (pSwitchToThisWindow)GetProcAddress(hUser32, MAKEINTRESOURCEA(0x5E9));
+        }
+        if (fpSwitchToThisWindow) {
+            MH_CreateHook(fpSwitchToThisWindow, &Detour_SwitchToThisWindow, (LPVOID*)&fpSwitchToThisWindow);
+            Log("[DllMain] Hook SwitchToThisWindow: %p\n", fpSwitchToThisWindow);
+        } else {
+            Log("[DllMain] SwitchToThisWindow not found!\n");
+        }
+    }
+
+    MH_CreateHookApi(L"user32.dll", "ShowWindow",
+        &Detour_ShowWindow, (LPVOID*)&fpShowWindow);
+    Log("[DllMain] Hook ShowWindow: %p\n", fpShowWindow);
+
+    MH_CreateHookApi(L"user32.dll", "MoveWindow",
+        &Detour_MoveWindow, (LPVOID*)&fpMoveWindow);
+    Log("[DllMain] Hook MoveWindow: %p\n", fpMoveWindow);
 
     status = MH_EnableHook(MH_ALL_HOOKS);
     Log("[DllMain] MH_EnableHook: %d\n", status);
