@@ -20,7 +20,7 @@ typedef BOOL(WINAPI* pBringWindowToTop)(HWND);
 typedef BOOL(WINAPI* pSetForegroundWindow)(HWND);
 typedef BOOL(WINAPI* pSetWindowPos)(HWND, HWND, int, int, int, int, UINT);
 typedef HWND(WINAPI* pSetFocus)(HWND);
-typedef BOOL(WINAPI* pSetActiveWindow)(HWND);
+typedef HWND(WINAPI* pSetActiveWindow)(HWND);
 
 static pAttachThreadInput fpAttachThreadInput = nullptr;
 static pBringWindowToTop fpBringWindowToTop = nullptr;
