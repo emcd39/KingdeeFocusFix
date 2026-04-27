@@ -478,26 +478,6 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
 }
 
-        // 阻止金蝶
-        if (altDown && isKingdee) {
-            Log("[CbtProc] BLOCKED Kingdee!\n");
-            return 1;
-        }
-
-        // 阻止用友：只在离开用友时阻止（前一个窗口属于用友，目标窗口不属于用友）
-        if ((altDown || altRecent) && wasYonyouActive && !isYonyou) {
-            Log("[CbtProc] BLOCKED leaving Yonyou!\n");
-            return 1;
-        }
-
-        // 记录非用友窗口
-        if (!isYonyou) {
-            g_hLastForeground = hwnd;
-        }
-    }
-    return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
-}
-
 // ========== 焦点监控回调 ==========
 static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
