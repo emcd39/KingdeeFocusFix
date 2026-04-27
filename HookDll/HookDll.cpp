@@ -147,10 +147,20 @@ static bool IsAltDown() {
            (GetAsyncKeyState(VK_RMENU) & 0x8000);
 }
 
-// 检查是否应该阻止焦点抢占
-// 条件：Alt 正在按下 OR Alt 在最近 500ms 内被按下过
+// 检查并阻止：如果 Alt 在最近 N ms 内被按下过，则阻止并刷新时间戳
 static bool ShouldBlock() {
-    return IsAltDown() || WasAltRecentlyPressed();
+    if (!g_pShared) return false;
+    DWORD pressTime = (DWORD)InterlockedCompareExchange(&g_pShared->altPressTime, 0, 0);
+    if (pressTime == 0) return false;
+    DWORD now = GetTickCount();
+    DWORD elapsed = now - pressTime;
+    if (elapsed < ALT_BLOCK_WINDOW_MS) {
+        // 刷新时间戳，延长阻止窗口
+        InterlockedExchange(&g_pShared->altPressTime, now);
+        Log("[ShouldBlock] BLOCK elapsed=%lu, refreshed timestamp\n", elapsed);
+        return true;
+    }
+    return false;
 }
 
 // ========== Hook Detours ==========
