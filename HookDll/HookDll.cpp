@@ -478,52 +478,6 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
 }
 
-// ========== 焦点监控回调 ==========
-static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
-    LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
-    if (event != EVENT_SYSTEM_FOREGROUND) return;
-    
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    
-    // 检查是否是用友窗口获得焦点
-    bool isYonyou = false;
-    if (pid) {
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe;
-            pe.dwSize = sizeof(pe);
-            if (Process32FirstW(hSnap, &pe)) {
-                do {
-                    if (pe.th32ProcessID == pid) {
-                        wchar_t name[MAX_PATH];
-                        int j = 0;
-                        for (j = 0; pe.szExeFile[j]; j++)
-                            name[j] = (wchar_t)towlower(pe.szExeFile[j]);
-                        name[j] = 0;
-                        isYonyou = (wcscmp(name, L"enterpriseportal.exe") == 0);
-                        break;
-                    }
-                } while (Process32NextW(hSnap, &pe));
-            }
-            CloseHandle(hSnap);
-        }
-    }
-    
-    if (isYonyou && WasAltRecentlyPressedCBT()) {
-        Log("[WinEventProc] Yonyou got focus during Alt+Tab, restoring previous window\n");
-        HWND hPrev = g_hLastForeground;
-        if (hPrev && IsWindow(hPrev)) {
-            SetForegroundWindow(hPrev);
-        }
-    }
-    
-    // 记录非用友窗口作为"上一个前台窗口"
-    if (!isYonyou) {
-        g_hLastForeground = hwnd;
-    }
-}
-
 // ========== DLL 入口 ==========
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
