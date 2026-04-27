@@ -32,7 +32,7 @@ struct SharedData {
 static HANDLE g_hSharedMem = NULL;
 static SharedData* g_pShared = nullptr;
 static const wchar_t* SHARED_MEM_NAME = L"KingdeeFocusFix_SharedMem";
-static const int ALT_BLOCK_WINDOW_MS = 500;  // Alt 按下后 500ms 内阻止焦点抢占
+static const int ALT_BLOCK_WINDOW_MS = 2000;  // 每次阻止后 2s 内继续阻止
 
 static void InitSharedMemory() {
     // 尝试打开已存在的共享内存，如果不存在则创建
