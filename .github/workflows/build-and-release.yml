@@ -56,7 +56,7 @@ jobs:
         run: |
           mkdir -p release
           copy "HookDll\x64\Release\HookDll64.dll" "release\"
-          copy "HookDll\Win32\Release\HookDll32.dll" "release\"
+          copy "HookDll\Release\HookDll32.dll" "release\"
           copy "KingdeeWorker\bin\Release\net48\KingdeeWorker.exe" "release\"
           copy "YonyouWorker\bin\Release\net48\YonyouWorker.exe" "release\"
           copy "YonyouAndKingdeeFix\bin\Release\net48\YonyouAndKingdeeFix.exe" "release\"
