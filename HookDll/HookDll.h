@@ -1,4 +1,5 @@
 ﻿#pragma once
+
 #ifdef HOOKDLL_EXPORTS
 #define HOOKDLL_API __declspec(dllexport)
 #else
@@ -6,6 +7,6 @@
 #endif
 
 extern "C" {
-    HOOKDLL_API BOOL InstallHook();
-    HOOKDLL_API BOOL UninstallHook();
+    HOOKDLL_API BOOL InstallCbtHook(DWORD threadId);
+    HOOKDLL_API void UninstallCbtHook();
 }

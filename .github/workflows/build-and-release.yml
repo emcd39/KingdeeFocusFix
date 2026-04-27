@@ -22,7 +22,12 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build HookDll (C++ DLL)
+      - name: Setup .NET Framework
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build HookDll x64 (C++ DLL)
         run: |
           msbuild HookDll/HookDll.vcxproj `
             /p:Configuration=Release `
@@ -30,19 +35,31 @@ jobs:
             /p:PlatformToolset=v143 `
             /p:WindowsTargetPlatformVersion=10.0
 
-      - name: Setup .NET Framework
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+      - name: Build HookDll x86 (C++ DLL)
+        run: |
+          msbuild HookDll/HookDll.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=Win32 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
 
-      - name: Build FixApp (C# EXE)
-        run: dotnet build FixApp/FixApp.csproj -c Release
+      - name: Build KingdeeWorker (x64)
+        run: dotnet build KingdeeWorker/KingdeeWorker.csproj -c Release
+
+      - name: Build YonyouWorker (x86)
+        run: dotnet build YonyouWorker/YonyouWorker.csproj -c Release
+
+      - name: Build YonyouAndKingdeeFix (AnyCPU)
+        run: dotnet build YonyouAndKingdeeFix/YonyouAndKingdeeFix.csproj -c Release
 
       - name: Prepare release artifacts
         run: |
           mkdir -p release
-          copy "HookDll\x64\Release\HookDll.dll" "release\"
-          copy "FixApp\bin\Release\net48\KingdeeFocusFix.exe" "release\"
+          copy "HookDll\x64\Release\HookDll64.dll" "release\"
+          copy "HookDll\Win32\Release\HookDll32.dll" "release\"
+          copy "KingdeeWorker\bin\Release\net48\KingdeeWorker.exe" "release\"
+          copy "YonyouWorker\bin\Release\net48\YonyouWorker.exe" "release\"
+          copy "YonyouAndKingdeeFix\bin\Release\net48\YonyouAndKingdeeFix.exe" "release\"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -74,20 +91,28 @@ jobs:
           body: |
             ## KingdeeFocusFix ${{ inputs.version }}
 
-            金蝶云·星空财务报表系统焦点修复工具
+            金蝶/用友焦点修复工具
+
+            ### 功能
+            - 修复金蝶云·星空财务报表系统 (Kingdee.BOS.KDSReport.exe) Alt+Tab 焦点抢占
+            - 修复用友 (EnterprisePortal.exe) Alt+Tab 焦点抢占
 
             ### 使用方法
             1. 下载并解压 ZIP 文件
-            2. 右键 `KingdeeFocusFix.exe` → 以管理员身份运行
+            2. 右键 `YonyouAndKingdeeFix.exe` → 以管理员身份运行
             3. 系统托盘出现盾牌图标表示运行中
 
             ### 文件说明
-            - `KingdeeFocusFix.exe` - 主程序（托盘应用）
-            - `HookDll.dll` - CBT 钩子 DLL
+            - `YonyouAndKingdeeFix.exe` - 统一启动器（托盘应用）
+            - `KingdeeWorker.exe` - 金蝶修复进程 (64位)
+            - `YonyouWorker.exe` - 用友修复进程 (32位)
+            - `HookDll64.dll` - 金蝶 CBT 钩子 DLL (64位)
+            - `HookDll32.dll` - 用友 MinHook DLL (32位)
 
             ### 系统要求
-            - Windows 10 / Windows 11 (x64)
-            - 无需额外运行时（.NET Framework 4.8 系统自带）
+            - Windows 10 / Windows 11
+            - .NET Framework 4.8（系统自带）
+            - Visual C++ 运行库（通常已安装）
           draft: false
           prerelease: false
           files: |
