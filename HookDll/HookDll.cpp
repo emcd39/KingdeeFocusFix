@@ -410,10 +410,10 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         bool isKingdee = IsKingdeeReport(hwnd);
         bool isYonyou = IsYonyouWindow(hwnd);
         bool altRecent = WasAltRecentlyPressedCBT();
-        bool wasYonyouActive = IsYonyouWindow(hwndActive);
+        bool wasYonyouActive = IsYonyouWindow(hwndActive) || IsYonyouWindow(g_hLastForeground);
 
-        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, wasYonyouActive=%d\n",
-            hwnd, altDown, isKingdee, isYonyou, altRecent, wasYonyouActive);
+        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, wasYonyouActive=%d, lastFg=%p\n",
+            hwnd, altDown, isKingdee, isYonyou, altRecent, wasYonyouActive, g_hLastForeground);
 
         if (altDown) {
             RecordAltPress();
@@ -426,15 +426,15 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
             return 1;
         }
 
-        // 用友窗口即将被激活
-        if (isYonyou && (altDown || altRecent)) {
-            // 虽然无法阻止激活，但可以立即切回上一个窗口
-            if (hwndActive && !IsYonyouWindow(hwndActive)) {
-                g_hLastForeground = hwndActive;
-                Log("[CbtProc] Yonyou stealing focus, will restore to %p\n", g_hLastForeground);
-                // 使用 PostMessage 异步恢复焦点（避免死锁）
-                PostMessage(hwndActive, WM_ACTIVATE, WA_ACTIVE, 0);
-            }
+        // 阻止用友：只在离开用友时阻止（前一个窗口属于用友，目标窗口不属于用友）
+        if ((altDown || altRecent) && wasYonyouActive && !isYonyou) {
+            Log("[CbtProc] BLOCKED leaving Yonyou!\n");
+            return 1;
+        }
+
+        // 记录非用友窗口
+        if (!isYonyou) {
+            g_hLastForeground = hwnd;
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
