@@ -31,18 +31,30 @@ struct SharedData {
 
 static HANDLE g_hSharedMem = NULL;
 static SharedData* g_pShared = nullptr;
-static const wchar_t* SHARED_MEM_NAME = L"Global\\KingdeeFocusFix_SharedMem";
+static const wchar_t* SHARED_MEM_NAME = L"KingdeeFocusFix_SharedMem";
 static const int ALT_BLOCK_WINDOW_MS = 500;  // Alt 按下后 500ms 内阻止焦点抢占
 
 static void InitSharedMemory() {
-    g_hSharedMem = CreateFileMappingW(
-        INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-        0, sizeof(SharedData), SHARED_MEM_NAME);
+    // 尝试打开已存在的共享内存，如果不存在则创建
+    g_hSharedMem = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, SHARED_MEM_NAME);
+    if (!g_hSharedMem) {
+        g_hSharedMem = CreateFileMappingW(
+            INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+            0, sizeof(SharedData), SHARED_MEM_NAME);
+        Log("[InitSharedMemory] Created new shared memory: %p\n", g_hSharedMem);
+    } else {
+        Log("[InitSharedMemory] Opened existing shared memory: %p\n", g_hSharedMem);
+    }
+
     if (g_hSharedMem) {
         g_pShared = (SharedData*)MapViewOfFile(g_hSharedMem, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedData));
+        Log("[InitSharedMemory] Mapped view: %p\n", g_pShared);
         if (g_pShared) {
-            InterlockedExchange(&g_pShared->altPressTime, 0);
+            // 只有创建者才初始化为 0
+            // InterlockedExchange(&g_pShared->altPressTime, 0);
         }
+    } else {
+        Log("[InitSharedMemory] FAILED to create/open shared memory\n");
     }
 }
 
@@ -60,17 +72,31 @@ static void CleanupSharedMemory() {
 // 记录 Alt 按下的时间
 static void RecordAltPress() {
     if (g_pShared) {
-        InterlockedExchange(&g_pShared->altPressTime, GetTickCount());
+        DWORD now = GetTickCount();
+        InterlockedExchange(&g_pShared->altPressTime, now);
+        Log("[RecordAltPress] Recorded time=%lu, g_pShared=%p\n", now, g_pShared);
+    } else {
+        Log("[RecordAltPress] FAILED: g_pShared is null\n");
     }
 }
 
 // 检查 Alt 是否在最近 N ms 内被按下过
 static bool WasAltRecentlyPressed() {
-    if (!g_pShared) return false;
+    if (!g_pShared) {
+        Log("[WasAltRecentlyPressed] FAILED: g_pShared is null\n");
+        return false;
+    }
     DWORD pressTime = (DWORD)InterlockedCompareExchange(&g_pShared->altPressTime, 0, 0);
-    if (pressTime == 0) return false;
-    DWORD elapsed = GetTickCount() - pressTime;
-    return elapsed < ALT_BLOCK_WINDOW_MS;
+    if (pressTime == 0) {
+        Log("[WasAltRecentlyPressed] pressTime=0, returning false\n");
+        return false;
+    }
+    DWORD now = GetTickCount();
+    DWORD elapsed = now - pressTime;
+    bool result = elapsed < ALT_BLOCK_WINDOW_MS;
+    Log("[WasAltRecentlyPressed] pressTime=%lu, now=%lu, elapsed=%lu, result=%d\n",
+        pressTime, now, elapsed, result);
+    return result;
 }
 
 // ========== 共享数据段 ==========
