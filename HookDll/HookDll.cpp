@@ -1,4 +1,5 @@
-﻿#define WIN32_LEAN_AND_MEAN
+﻿#define _CRT_SECURE_NO_WARNINGS
+#define WIN32_LEAN_AND_MEAN
 #define HOOKDLL_EXPORTS
 #include <windows.h>
 #include <tlhelp32.h>
