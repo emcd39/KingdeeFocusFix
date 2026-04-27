@@ -399,6 +399,8 @@ static bool WasAltRecentlyPressedCBT() {
     return elapsed < ALT_BLOCK_WINDOW_MS;
 }
 
+static HWND g_hLastForeground = NULL;  // 记录上一个前台窗口
+
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
         HWND hwnd = (HWND)wParam;
@@ -423,13 +425,67 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
             return 1;
         }
 
-        // 阻止用友：只在离开用友时阻止（当前活动窗口属于用友，目标窗口不属于用友）
-        if ((altDown || altRecent) && wasYonyouActive && !isYonyou) {
-            Log("[CbtProc] BLOCKED leaving Yonyou!\n");
-            return 1;
+        // 用友窗口即将被激活
+        if (isYonyou && (altDown || altRecent)) {
+            // 虽然无法阻止激活，但可以立即切回上一个窗口
+            if (hwndActive && !IsYonyouWindow(hwndActive)) {
+                g_hLastForeground = hwndActive;
+                Log("[CbtProc] Yonyou stealing focus, will restore to %p\n", g_hLastForeground);
+                // 使用 PostMessage 异步恢复焦点（避免死锁）
+                PostMessage(hwndActive, WM_ACTIVATE, WA_ACTIVE, 0);
+            }
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
+}
+
+// ========== 全局变量 ==========
+static HWND g_hLastForeground = NULL;  // 记录上一个前台窗口
+static HWINEVENTHOOK g_hEventHook = NULL;  // 焦点监控钩子
+
+// ========== 焦点监控回调 ==========
+static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
+    LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+    if (event != EVENT_SYSTEM_FOREGROUND) return;
+    
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    
+    // 检查是否是用友窗口获得焦点
+    bool isYonyou = false;
+    if (pid) {
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe;
+            pe.dwSize = sizeof(pe);
+            if (Process32FirstW(hSnap, &pe)) {
+                do {
+                    if (pe.th32ProcessID == pid) {
+                        wchar_t name[MAX_PATH];
+                        for (int i = 0; pe.szExeFile[i]; i++)
+                            name[i] = (wchar_t)towlower(pe.szExeFile[i]);
+                        name[i] = 0;
+                        isYonyou = (wcscmp(name, L"enterpriseportal.exe") == 0);
+                        break;
+                    }
+                } while (Process32NextW(hSnap, &pe));
+            }
+            CloseHandle(hSnap);
+        }
+    }
+    
+    if (isYonyou && WasAltRecentlyPressedCBT()) {
+        Log("[WinEventProc] Yonyou got focus during Alt+Tab, restoring previous window\n");
+        HWND hPrev = g_hLastForeground;
+        if (hPrev && IsWindow(hPrev)) {
+            SetForegroundWindow(hPrev);
+        }
+    }
+    
+    // 记录非用友窗口作为"上一个前台窗口"
+    if (!isYonyou) {
+        g_hLastForeground = hwnd;
+    }
 }
 
 // ========== DLL 入口 ==========
@@ -452,11 +508,23 @@ extern "C" HOOKDLL_API BOOL InstallCbtHook(DWORD threadId) {
     if (g_hCbtHook) return TRUE;
     g_hCbtHook = SetWindowsHookEx(WH_CBT, CbtProc, g_hMod, threadId);
     Log("[InstallCbtHook] g_hCbtHook=%p\n", g_hCbtHook);
+    
+    // 安装焦点监控钩子
+    g_hEventHook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+        NULL, WinEventProc, 0, 0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    Log("[InstallCbtHook] g_hEventHook=%p\n", g_hEventHook);
+    
     return g_hCbtHook != NULL;
 }
 
 extern "C" HOOKDLL_API void UninstallCbtHook() {
     Log("[UninstallCbtHook]\n");
+    if (g_hEventHook) {
+        UnhookWinEvent(g_hEventHook);
+        g_hEventHook = NULL;
+    }
     if (g_hCbtHook) {
         UnhookWindowsHookEx(g_hCbtHook);
         g_hCbtHook = NULL;
