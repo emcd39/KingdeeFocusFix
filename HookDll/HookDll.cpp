@@ -322,6 +322,10 @@ static void InstallMinHookIfYonyou() {
 
     status = MH_EnableHook(MH_ALL_HOOKS);
     Log("[DllMain] MH_EnableHook: %d\n", status);
+
+    // 安装 WH_CALLWNDPROC 钩子监控窗口消息
+    g_hCallWndProcHook = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, g_hMod, 0);
+    Log("[DllMain] WH_CALLWNDPROC hook installed: %p\n", g_hCallWndProcHook);
 }
 
 static void UninstallMinHookIfYonyou() {
@@ -386,6 +390,22 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
+}
+
+// ========== 窗口消息监控 ==========
+static HHOOK g_hCallWndProcHook = NULL;
+
+static LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode >= 0) {
+        CWPSTRUCT* pMsg = (CWPSTRUCT*)lParam;
+        if (pMsg->message == WM_ACTIVATE) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(pMsg->hwnd, &pid);
+            Log("[CallWndProc] WM_ACTIVATE hwnd=%p, wParam=%p, lParam=%p, pid=%lu\n",
+                pMsg->hwnd, (void*)pMsg->wParam, (void*)pMsg->lParam, pid);
+        }
+    }
+    return CallNextHookEx(g_hCallWndProcHook, nCode, wParam, lParam);
 }
 
 // ========== DLL 入口 ==========
