@@ -402,23 +402,30 @@ static bool WasAltRecentlyPressedCBT() {
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
         HWND hwnd = (HWND)wParam;
+        HWND hwndActive = GetForegroundWindow();
         bool altDown = IsAltDown();
         bool isKingdee = IsKingdeeReport(hwnd);
         bool isYonyou = IsYonyouWindow(hwnd);
         bool altRecent = WasAltRecentlyPressedCBT();
+        bool wasYonyouActive = IsYonyouWindow(hwndActive);
 
-        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d\n",
-            hwnd, altDown, isKingdee, isYonyou, altRecent);
+        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, wasYonyouActive=%d\n",
+            hwnd, altDown, isKingdee, isYonyou, altRecent, wasYonyouActive);
 
-        // 记录 Alt 按下的时间戳
         if (altDown) {
             RecordAltPress();
             Log("[CbtProc] Alt pressed, recorded timestamp\n");
         }
 
-        // 阻止金蝶或用友在 Alt+Tab 期间激活窗口
-        if ((altDown || altRecent) && (isKingdee || isYonyou)) {
-            Log("[CbtProc] BLOCKED! isKingdee=%d, isYonyou=%d\n", isKingdee, isYonyou);
+        // 阻止金蝶
+        if (altDown && isKingdee) {
+            Log("[CbtProc] BLOCKED Kingdee!\n");
+            return 1;
+        }
+
+        // 阻止用友：只在离开用友时阻止（当前活动窗口属于用友，目标窗口不属于用友）
+        if ((altDown || altRecent) && wasYonyouActive && !isYonyou) {
+            Log("[CbtProc] BLOCKED leaving Yonyou!\n");
             return 1;
         }
     }
