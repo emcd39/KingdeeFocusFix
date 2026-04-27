@@ -399,8 +399,49 @@ static bool WasAltRecentlyPressedCBT() {
     return elapsed < ALT_BLOCK_WINDOW_MS;
 }
 
-static HWND g_hLastForeground = NULL;  // 记录上一个前台窗口
-static HWINEVENTHOOK g_hEventHook = NULL;  // 焦点监控钩子
+static HWND g_hLastForeground = NULL;
+static HWINEVENTHOOK g_hEventHook = NULL;
+static bool g_bYonyouFocused = false;  // 用户是否在用友界面中
+
+static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
+    LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+    if (event != EVENT_SYSTEM_FOREGROUND) return;
+    
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    
+    bool isYonyou = false;
+    if (pid) {
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe;
+            pe.dwSize = sizeof(pe);
+            if (Process32FirstW(hSnap, &pe)) {
+                do {
+                    if (pe.th32ProcessID == pid) {
+                        wchar_t name[MAX_PATH];
+                        int j = 0;
+                        for (j = 0; pe.szExeFile[j]; j++)
+                            name[j] = (wchar_t)towlower(pe.szExeFile[j]);
+                        name[j] = 0;
+                        isYonyou = (wcscmp(name, L"enterpriseportal.exe") == 0);
+                        break;
+                    }
+                } while (Process32NextW(hSnap, &pe));
+            }
+            CloseHandle(hSnap);
+        }
+    }
+    
+    if (isYonyou) {
+        g_bYonyouFocused = true;
+        Log("[WinEventProc] Yonyou window got focus, setting g_bYonyouFocused=true\n");
+    } else {
+        g_bYonyouFocused = false;
+        g_hLastForeground = hwnd;
+        Log("[WinEventProc] Non-Yonyou window got focus: %p, pid=%lu\n", hwnd, pid);
+    }
+}
 
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
@@ -410,15 +451,32 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         bool isKingdee = IsKingdeeReport(hwnd);
         bool isYonyou = IsYonyouWindow(hwnd);
         bool altRecent = WasAltRecentlyPressedCBT();
-        bool wasYonyouActive = IsYonyouWindow(hwndActive) || IsYonyouWindow(g_hLastForeground);
 
-        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, wasYonyouActive=%d, lastFg=%p\n",
-            hwnd, altDown, isKingdee, isYonyou, altRecent, wasYonyouActive, g_hLastForeground);
+        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, yonyouFocused=%d, lastFg=%p\n",
+            hwnd, altDown, isKingdee, isYonyou, altRecent, g_bYonyouFocused, g_hLastForeground);
 
         if (altDown) {
             RecordAltPress();
             Log("[CbtProc] Alt pressed, recorded timestamp\n");
         }
+
+        if (altDown && isKingdee) {
+            Log("[CbtProc] BLOCKED Kingdee!\n");
+            return 1;
+        }
+
+        // 阻止用友：用户在用友界面中 + 目标窗口不属于用友
+        if ((altDown || altRecent) && g_bYonyouFocused && !isYonyou) {
+            Log("[CbtProc] BLOCKED leaving Yonyou! target=%p\n", hwnd);
+            if (g_hLastForeground && IsWindow(g_hLastForeground)) {
+                PostMessage(g_hLastForeground, WM_ACTIVATE, WA_ACTIVE, 0);
+                Log("[CbtProc] Restoring focus to %p\n", g_hLastForeground);
+            }
+            return 1;
+        }
+    }
+    return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
+}
 
         // 阻止金蝶
         if (altDown && isKingdee) {
