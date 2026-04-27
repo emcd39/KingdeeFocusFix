@@ -3,8 +3,24 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <string>
+#include <stdio.h>
 #include "MinHook.h"
 #include "HookDll.h"
+
+// ========== 日志 ==========
+static FILE* g_logFile = nullptr;
+
+static void Log(const char* fmt, ...) {
+    if (!g_logFile) {
+        g_logFile = fopen("C:\\temp\\hook_debug.log", "a");
+        if (!g_logFile) return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(g_logFile, fmt, args);
+    va_end(args);
+    fflush(g_logFile);
+}
 
 // ========== 共享数据段 ==========
 #pragma data_seg(".SHARED")
@@ -50,88 +66,121 @@ static bool IsAltDown() {
 
 // ========== Hook Detours ==========
 
-// Hook AttachThreadInput - 阻止用友在 Alt+Tab 时连接线程输入
 static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BOOL fAttach) {
-    if (fAttach && IsAltDown()) {
+    bool altDown = IsAltDown();
+    Log("[AttachThreadInput] idAttach=%d, idAttachTo=%d, fAttach=%d, altDown=%d\n",
+        idAttach, idAttachTo, fAttach, altDown);
+    if (fAttach && altDown) {
+        Log("[AttachThreadInput] BLOCKED!\n");
         return FALSE;
     }
     return fpAttachThreadInput(idAttach, idAttachTo, fAttach);
 }
 
-// Hook BringWindowToTop - 阻止用友在 Alt+Tab 时抢占前台
 static BOOL WINAPI Detour_BringWindowToTop(HWND hWnd) {
-    if (IsAltDown()) {
+    bool altDown = IsAltDown();
+    Log("[BringWindowToTop] hWnd=%p, altDown=%d\n", hWnd, altDown);
+    if (altDown) {
+        Log("[BringWindowToTop] BLOCKED!\n");
         return FALSE;
     }
     return fpBringWindowToTop(hWnd);
 }
 
-// Hook SetForegroundWindow - 阻止用友强制设置前台窗口
 static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
-    if (IsAltDown()) {
+    bool altDown = IsAltDown();
+    Log("[SetForegroundWindow] hWnd=%p, altDown=%d\n", hWnd, altDown);
+    if (altDown) {
+        Log("[SetForegroundWindow] BLOCKED!\n");
         return FALSE;
     }
     return fpSetForegroundWindow(hWnd);
 }
 
-// Hook SetWindowPos - 阻止用友在 Alt+Tab 时置顶窗口
 static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
-    if (IsAltDown() && (hWndInsertAfter == HWND_TOP || hWndInsertAfter == HWND_TOPMOST)) {
+    bool altDown = IsAltDown();
+    bool isTop = (hWndInsertAfter == HWND_TOP || hWndInsertAfter == HWND_TOPMOST);
+    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=%u, altDown=%d, isTop=%d\n",
+        hWnd, hWndInsertAfter, uFlags, altDown, isTop);
+    if (altDown && isTop) {
+        Log("[SetWindowPos] BLOCKED!\n");
         return FALSE;
     }
     return fpSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
-// Hook SetFocus - 阻止用友在 Alt+Tab 时抢夺焦点
 static HWND WINAPI Detour_SetFocus(HWND hWnd) {
-    if (IsAltDown()) {
+    bool altDown = IsAltDown();
+    Log("[SetFocus] hWnd=%p, altDown=%d\n", hWnd, altDown);
+    if (altDown) {
+        Log("[SetFocus] BLOCKED!\n");
         return NULL;
     }
     return fpSetFocus(hWnd);
 }
 
-// Hook SetActiveWindow - 阻止用友在 Alt+Tab 时激活窗口
 static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
-    if (IsAltDown()) {
+    bool altDown = IsAltDown();
+    Log("[SetActiveWindow] hWnd=%p, altDown=%d\n", hWnd, altDown);
+    if (altDown) {
+        Log("[SetActiveWindow] BLOCKED!\n");
         return NULL;
     }
     return fpSetActiveWindow(hWnd);
 }
 
 static void InstallMinHookIfYonyou() {
-    if (!IsYonyouProcess()) return;
+    Log("[DllMain] DLL loaded in process: %s\n", GetCurrentProcessName().c_str());
+
+    if (!IsYonyouProcess()) {
+        Log("[DllMain] Not Yonyou process, skipping MinHook\n");
+        return;
+    }
 
     g_isYonyou = true;
+    Log("[DllMain] Yonyou process detected! Installing MinHook...\n");
 
     MH_STATUS status = MH_Initialize();
+    Log("[DllMain] MH_Initialize: %d\n", status);
     if (status != MH_OK) return;
 
-    // Hook 所有焦点相关 API
     MH_CreateHookApi(L"user32.dll", "AttachThreadInput",
         &Detour_AttachThreadInput, (LPVOID*)&fpAttachThreadInput);
+    Log("[DllMain] Hook AttachThreadInput: %p\n", fpAttachThreadInput);
 
     MH_CreateHookApi(L"user32.dll", "BringWindowToTop",
         &Detour_BringWindowToTop, (LPVOID*)&fpBringWindowToTop);
+    Log("[DllMain] Hook BringWindowToTop: %p\n", fpBringWindowToTop);
 
     MH_CreateHookApi(L"user32.dll", "SetForegroundWindow",
         &Detour_SetForegroundWindow, (LPVOID*)&fpSetForegroundWindow);
+    Log("[DllMain] Hook SetForegroundWindow: %p\n", fpSetForegroundWindow);
 
     MH_CreateHookApi(L"user32.dll", "SetWindowPos",
         &Detour_SetWindowPos, (LPVOID*)&fpSetWindowPos);
+    Log("[DllMain] Hook SetWindowPos: %p\n", fpSetWindowPos);
 
     MH_CreateHookApi(L"user32.dll", "SetFocus",
         &Detour_SetFocus, (LPVOID*)&fpSetFocus);
+    Log("[DllMain] Hook SetFocus: %p\n", fpSetFocus);
 
     MH_CreateHookApi(L"user32.dll", "SetActiveWindow",
         &Detour_SetActiveWindow, (LPVOID*)&fpSetActiveWindow);
+    Log("[DllMain] Hook SetActiveWindow: %p\n", fpSetActiveWindow);
 
-    MH_EnableHook(MH_ALL_HOOKS);
+    status = MH_EnableHook(MH_ALL_HOOKS);
+    Log("[DllMain] MH_EnableHook: %d\n", status);
 }
 
 static void UninstallMinHookIfYonyou() {
     if (g_isYonyou) {
+        Log("[DllMain] Uninstalling MinHook\n");
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
+    }
+    if (g_logFile) {
+        fclose(g_logFile);
+        g_logFile = nullptr;
     }
 }
 
@@ -168,7 +217,11 @@ static bool IsKingdeeReport(HWND hwnd) {
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
         HWND hwnd = (HWND)wParam;
-        if (IsAltDown() && IsKingdeeReport(hwnd)) {
+        bool altDown = IsAltDown();
+        bool isKingdee = IsKingdeeReport(hwnd);
+        Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d\n", hwnd, altDown, isKingdee);
+        if (altDown && isKingdee) {
+            Log("[CbtProc] BLOCKED Kingdee!\n");
             return 1;
         }
     }
@@ -191,12 +244,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
 // ========== 导出函数（供 C# 宿主调用） ==========
 extern "C" HOOKDLL_API BOOL InstallCbtHook(DWORD threadId) {
+    Log("[InstallCbtHook] threadId=%d\n", threadId);
     if (g_hCbtHook) return TRUE;
     g_hCbtHook = SetWindowsHookEx(WH_CBT, CbtProc, g_hMod, threadId);
+    Log("[InstallCbtHook] g_hCbtHook=%p\n", g_hCbtHook);
     return g_hCbtHook != NULL;
 }
 
 extern "C" HOOKDLL_API void UninstallCbtHook() {
+    Log("[UninstallCbtHook]\n");
     if (g_hCbtHook) {
         UnhookWindowsHookEx(g_hCbtHook);
         g_hCbtHook = NULL;
