@@ -17,9 +17,19 @@ static HMODULE g_hMod = NULL;
 // ========== MinHook 相关（拦截用友） ==========
 typedef BOOL(WINAPI* pAttachThreadInput)(DWORD, DWORD, BOOL);
 typedef BOOL(WINAPI* pBringWindowToTop)(HWND);
+typedef BOOL(WINAPI* pSetForegroundWindow)(HWND);
+typedef BOOL(WINAPI* pSetWindowPos)(HWND, HWND, int, int, int, int, UINT);
+typedef HWND(WINAPI* pSetFocus)(HWND);
+typedef BOOL(WINAPI* pSetActiveWindow)(HWND);
 
 static pAttachThreadInput fpAttachThreadInput = nullptr;
 static pBringWindowToTop fpBringWindowToTop = nullptr;
+static pSetForegroundWindow fpSetForegroundWindow = nullptr;
+static pSetWindowPos fpSetWindowPos = nullptr;
+static pSetFocus fpSetFocus = nullptr;
+static pSetActiveWindow fpSetActiveWindow = nullptr;
+
+static bool g_isYonyou = false;
 
 static std::string GetCurrentProcessName() {
     char path[MAX_PATH];
@@ -29,50 +39,97 @@ static std::string GetCurrentProcessName() {
 }
 
 static bool IsYonyouProcess() {
-    return _stricmp(GetCurrentProcessName().c_str(), "EnterprisePortal.exe") == 0;
+    std::string name = GetCurrentProcessName();
+    return (_stricmp(name.c_str(), "EnterprisePortal.exe") == 0);
 }
+
+static bool IsAltDown() {
+    return (GetAsyncKeyState(VK_LMENU) & 0x8000) ||
+           (GetAsyncKeyState(VK_RMENU) & 0x8000);
+}
+
+// ========== Hook Detours ==========
 
 // Hook AttachThreadInput - 阻止用友在 Alt+Tab 时连接线程输入
 static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BOOL fAttach) {
-    if (fAttach) {
-        bool altDown = (GetAsyncKeyState(VK_LMENU) & 0x8000) ||
-                       (GetAsyncKeyState(VK_RMENU) & 0x8000);
-        if (altDown) {
-            return FALSE;   // 阻止连接
-        }
+    if (fAttach && IsAltDown()) {
+        return FALSE;
     }
     return fpAttachThreadInput(idAttach, idAttachTo, fAttach);
 }
 
 // Hook BringWindowToTop - 阻止用友在 Alt+Tab 时抢占前台
 static BOOL WINAPI Detour_BringWindowToTop(HWND hWnd) {
-    bool altDown = (GetAsyncKeyState(VK_LMENU) & 0x8000) ||
-                   (GetAsyncKeyState(VK_RMENU) & 0x8000);
-    if (altDown) {
-        return FALSE;   // 阻止置顶
+    if (IsAltDown()) {
+        return FALSE;
     }
     return fpBringWindowToTop(hWnd);
+}
+
+// Hook SetForegroundWindow - 阻止用友强制设置前台窗口
+static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
+    if (IsAltDown()) {
+        return FALSE;
+    }
+    return fpSetForegroundWindow(hWnd);
+}
+
+// Hook SetWindowPos - 阻止用友在 Alt+Tab 时置顶窗口
+static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
+    if (IsAltDown() && (hWndInsertAfter == HWND_TOP || hWndInsertAfter == HWND_TOPMOST)) {
+        return FALSE;
+    }
+    return fpSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+}
+
+// Hook SetFocus - 阻止用友在 Alt+Tab 时抢夺焦点
+static HWND WINAPI Detour_SetFocus(HWND hWnd) {
+    if (IsAltDown()) {
+        return NULL;
+    }
+    return fpSetFocus(hWnd);
+}
+
+// Hook SetActiveWindow - 阻止用友在 Alt+Tab 时激活窗口
+static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
+    if (IsAltDown()) {
+        return NULL;
+    }
+    return fpSetActiveWindow(hWnd);
 }
 
 static void InstallMinHookIfYonyou() {
     if (!IsYonyouProcess()) return;
 
+    g_isYonyou = true;
+
     MH_STATUS status = MH_Initialize();
     if (status != MH_OK) return;
 
-    // Hook AttachThreadInput
+    // Hook 所有焦点相关 API
     MH_CreateHookApi(L"user32.dll", "AttachThreadInput",
         &Detour_AttachThreadInput, (LPVOID*)&fpAttachThreadInput);
 
-    // Hook BringWindowToTop
     MH_CreateHookApi(L"user32.dll", "BringWindowToTop",
         &Detour_BringWindowToTop, (LPVOID*)&fpBringWindowToTop);
+
+    MH_CreateHookApi(L"user32.dll", "SetForegroundWindow",
+        &Detour_SetForegroundWindow, (LPVOID*)&fpSetForegroundWindow);
+
+    MH_CreateHookApi(L"user32.dll", "SetWindowPos",
+        &Detour_SetWindowPos, (LPVOID*)&fpSetWindowPos);
+
+    MH_CreateHookApi(L"user32.dll", "SetFocus",
+        &Detour_SetFocus, (LPVOID*)&fpSetFocus);
+
+    MH_CreateHookApi(L"user32.dll", "SetActiveWindow",
+        &Detour_SetActiveWindow, (LPVOID*)&fpSetActiveWindow);
 
     MH_EnableHook(MH_ALL_HOOKS);
 }
 
 static void UninstallMinHookIfYonyou() {
-    if (IsYonyouProcess()) {
+    if (g_isYonyou) {
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
@@ -94,7 +151,6 @@ static bool IsKingdeeReport(HWND hwnd) {
     if (Process32FirstW(hSnap, &pe)) {
         do {
             if (pe.th32ProcessID == processId) {
-                // 转小写比较
                 wchar_t name[MAX_PATH];
                 int i = 0;
                 for (i = 0; pe.szExeFile[i]; i++)
@@ -112,11 +168,8 @@ static bool IsKingdeeReport(HWND hwnd) {
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
         HWND hwnd = (HWND)wParam;
-        bool altDown = (GetAsyncKeyState(VK_LMENU) & 0x8000) ||
-                       (GetAsyncKeyState(VK_RMENU) & 0x8000);
-
-        if (altDown && IsKingdeeReport(hwnd)) {
-            return 1;   // 阻断激活
+        if (IsAltDown() && IsKingdeeReport(hwnd)) {
+            return 1;
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
