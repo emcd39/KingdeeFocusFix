@@ -189,9 +189,11 @@ static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
 static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
     bool block = ShouldBlock();
     bool isTop = (hWndInsertAfter == HWND_TOP || hWndInsertAfter == HWND_TOPMOST);
-    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=%u, block=%d, isTop=%d\n",
-        hWnd, hWndInsertAfter, uFlags, block, isTop);
-    if (block && isTop) {
+    bool isBottom = (hWndInsertAfter == HWND_BOTTOM);
+    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=%u, block=%d, isTop=%d, isBottom=%d\n",
+        hWnd, hWndInsertAfter, uFlags, block, isTop, isBottom);
+    // 阻止：1) Alt+Tab 时置顶窗口 2) Alt+Tab 时将窗口移到底部
+    if (block && (isTop || isBottom)) {
         Log("[SetWindowPos] BLOCKED!\n");
         return FALSE;
     }
@@ -229,12 +231,12 @@ static void WINAPI Detour_SwitchToThisWindow(HWND hwnd, BOOL fAltTab) {
     fpSwitchToThisWindow(hwnd, fAltTab);
 }
 
-// ShowWindow - 可能用于激活窗口
+// ShowWindow - 阻止用友隐藏其他窗口
 static BOOL WINAPI Detour_ShowWindow(HWND hWnd, int nCmdShow) {
     bool block = ShouldBlock();
     Log("[ShowWindow] hWnd=%p, nCmdShow=%d, block=%d\n", hWnd, nCmdShow, block);
-    if (block && (nCmdShow == SW_SHOW || nCmdShow == SW_RESTORE || nCmdShow == SW_SHOWNA)) {
-        Log("[ShowWindow] BLOCKED!\n");
+    if (block && nCmdShow == SW_HIDE) {
+        Log("[ShowWindow] BLOCKED SW_HIDE!\n");
         return FALSE;
     }
     return fpShowWindow(hWnd, nCmdShow);
