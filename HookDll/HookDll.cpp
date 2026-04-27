@@ -23,6 +23,56 @@ static void Log(const char* fmt, ...) {
     fflush(g_logFile);
 }
 
+// ========== 共享内存（跨进程通信） ==========
+// 用于在 YonyouWorker 和 EnterprisePortal 之间共享 Alt 按下时间戳
+struct SharedData {
+    volatile LONG altPressTime;  // Alt 按下的时间戳 (GetTickCount)
+};
+
+static HANDLE g_hSharedMem = NULL;
+static SharedData* g_pShared = nullptr;
+static const wchar_t* SHARED_MEM_NAME = L"Global\\KingdeeFocusFix_SharedMem";
+static const int ALT_BLOCK_WINDOW_MS = 500;  // Alt 按下后 500ms 内阻止焦点抢占
+
+static void InitSharedMemory() {
+    g_hSharedMem = CreateFileMappingW(
+        INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+        0, sizeof(SharedData), SHARED_MEM_NAME);
+    if (g_hSharedMem) {
+        g_pShared = (SharedData*)MapViewOfFile(g_hSharedMem, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedData));
+        if (g_pShared) {
+            InterlockedExchange(&g_pShared->altPressTime, 0);
+        }
+    }
+}
+
+static void CleanupSharedMemory() {
+    if (g_pShared) {
+        UnmapViewOfFile(g_pShared);
+        g_pShared = nullptr;
+    }
+    if (g_hSharedMem) {
+        CloseHandle(g_hSharedMem);
+        g_hSharedMem = NULL;
+    }
+}
+
+// 记录 Alt 按下的时间
+static void RecordAltPress() {
+    if (g_pShared) {
+        InterlockedExchange(&g_pShared->altPressTime, GetTickCount());
+    }
+}
+
+// 检查 Alt 是否在最近 N ms 内被按下过
+static bool WasAltRecentlyPressed() {
+    if (!g_pShared) return false;
+    DWORD pressTime = (DWORD)InterlockedCompareExchange(&g_pShared->altPressTime, 0, 0);
+    if (pressTime == 0) return false;
+    DWORD elapsed = GetTickCount() - pressTime;
+    return elapsed < ALT_BLOCK_WINDOW_MS;
+}
+
 // ========== 共享数据段 ==========
 #pragma data_seg(".SHARED")
 HHOOK g_hCbtHook = NULL;
@@ -65,13 +115,19 @@ static bool IsAltDown() {
            (GetAsyncKeyState(VK_RMENU) & 0x8000);
 }
 
+// 检查是否应该阻止焦点抢占
+// 条件：Alt 正在按下 OR Alt 在最近 500ms 内被按下过
+static bool ShouldBlock() {
+    return IsAltDown() || WasAltRecentlyPressed();
+}
+
 // ========== Hook Detours ==========
 
 static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BOOL fAttach) {
-    bool altDown = IsAltDown();
-    Log("[AttachThreadInput] idAttach=%d, idAttachTo=%d, fAttach=%d, altDown=%d\n",
-        idAttach, idAttachTo, fAttach, altDown);
-    if (fAttach && altDown) {
+    bool block = ShouldBlock();
+    Log("[AttachThreadInput] idAttach=%d, idAttachTo=%d, fAttach=%d, block=%d\n",
+        idAttach, idAttachTo, fAttach, block);
+    if (fAttach && block) {
         Log("[AttachThreadInput] BLOCKED!\n");
         return FALSE;
     }
@@ -79,9 +135,9 @@ static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BO
 }
 
 static BOOL WINAPI Detour_BringWindowToTop(HWND hWnd) {
-    bool altDown = IsAltDown();
-    Log("[BringWindowToTop] hWnd=%p, altDown=%d\n", hWnd, altDown);
-    if (altDown) {
+    bool block = ShouldBlock();
+    Log("[BringWindowToTop] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
         Log("[BringWindowToTop] BLOCKED!\n");
         return FALSE;
     }
@@ -89,9 +145,9 @@ static BOOL WINAPI Detour_BringWindowToTop(HWND hWnd) {
 }
 
 static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
-    bool altDown = IsAltDown();
-    Log("[SetForegroundWindow] hWnd=%p, altDown=%d\n", hWnd, altDown);
-    if (altDown) {
+    bool block = ShouldBlock();
+    Log("[SetForegroundWindow] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
         Log("[SetForegroundWindow] BLOCKED!\n");
         return FALSE;
     }
@@ -99,11 +155,11 @@ static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
 }
 
 static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
-    bool altDown = IsAltDown();
+    bool block = ShouldBlock();
     bool isTop = (hWndInsertAfter == HWND_TOP || hWndInsertAfter == HWND_TOPMOST);
-    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=%u, altDown=%d, isTop=%d\n",
-        hWnd, hWndInsertAfter, uFlags, altDown, isTop);
-    if (altDown && isTop) {
+    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=%u, block=%d, isTop=%d\n",
+        hWnd, hWndInsertAfter, uFlags, block, isTop);
+    if (block && isTop) {
         Log("[SetWindowPos] BLOCKED!\n");
         return FALSE;
     }
@@ -111,9 +167,9 @@ static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, i
 }
 
 static HWND WINAPI Detour_SetFocus(HWND hWnd) {
-    bool altDown = IsAltDown();
-    Log("[SetFocus] hWnd=%p, altDown=%d\n", hWnd, altDown);
-    if (altDown) {
+    bool block = ShouldBlock();
+    Log("[SetFocus] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
         Log("[SetFocus] BLOCKED!\n");
         return NULL;
     }
@@ -121,9 +177,9 @@ static HWND WINAPI Detour_SetFocus(HWND hWnd) {
 }
 
 static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
-    bool altDown = IsAltDown();
-    Log("[SetActiveWindow] hWnd=%p, altDown=%d\n", hWnd, altDown);
-    if (altDown) {
+    bool block = ShouldBlock();
+    Log("[SetActiveWindow] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
         Log("[SetActiveWindow] BLOCKED!\n");
         return NULL;
     }
@@ -132,6 +188,9 @@ static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
 
 static void InstallMinHookIfYonyou() {
     Log("[DllMain] DLL loaded in process: %s\n", GetCurrentProcessName().c_str());
+
+    // 初始化共享内存
+    InitSharedMemory();
 
     if (!IsYonyouProcess()) {
         Log("[DllMain] Not Yonyou process, skipping MinHook\n");
@@ -179,13 +238,14 @@ static void UninstallMinHookIfYonyou() {
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
+    CleanupSharedMemory();
     if (g_logFile) {
         fclose(g_logFile);
         g_logFile = nullptr;
     }
 }
 
-// ========== CBT 钩子相关（拦截金蝶） ==========
+// ========== CBT 钩子相关（拦截金蝶 + 记录 Alt 时间戳） ==========
 static bool IsKingdeeReport(HWND hwnd) {
     DWORD processId = 0;
     GetWindowThreadProcessId(hwnd, &processId);
@@ -221,6 +281,13 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         bool altDown = IsAltDown();
         bool isKingdee = IsKingdeeReport(hwnd);
         Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d\n", hwnd, altDown, isKingdee);
+
+        // 记录 Alt 按下的时间戳（用于用友的延迟焦点抢占）
+        if (altDown) {
+            RecordAltPress();
+            Log("[CbtProc] Alt pressed, recorded timestamp\n");
+        }
+
         if (altDown && isKingdee) {
             Log("[CbtProc] BLOCKED Kingdee!\n");
             return 1;
