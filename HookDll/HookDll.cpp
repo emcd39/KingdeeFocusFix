@@ -253,6 +253,22 @@ static BOOL WINAPI Detour_MoveWindow(HWND hWnd, int X, int Y, int nWidth, int nH
     return fpMoveWindow(hWnd, X, Y, nWidth, nHeight, bRepaint);
 }
 
+// ========== 窗口消息监控 ==========
+static HHOOK g_hCallWndProcHook = NULL;
+
+static LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode >= 0) {
+        CWPSTRUCT* pMsg = (CWPSTRUCT*)lParam;
+        if (pMsg->message == WM_ACTIVATE) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(pMsg->hwnd, &pid);
+            Log("[CallWndProc] WM_ACTIVATE hwnd=%p, wParam=%p, lParam=%p, pid=%lu\n",
+                pMsg->hwnd, (void*)pMsg->wParam, (void*)pMsg->lParam, pid);
+        }
+    }
+    return CallNextHookEx(g_hCallWndProcHook, nCode, wParam, lParam);
+}
+
 static void InstallMinHookIfYonyou() {
     Log("[DllMain] DLL loaded in process: %s\n", GetCurrentProcessName().c_str());
 
@@ -390,22 +406,6 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
-}
-
-// ========== 窗口消息监控 ==========
-static HHOOK g_hCallWndProcHook = NULL;
-
-static LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode >= 0) {
-        CWPSTRUCT* pMsg = (CWPSTRUCT*)lParam;
-        if (pMsg->message == WM_ACTIVATE) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(pMsg->hwnd, &pid);
-            Log("[CallWndProc] WM_ACTIVATE hwnd=%p, wParam=%p, lParam=%p, pid=%lu\n",
-                pMsg->hwnd, (void*)pMsg->wParam, (void*)pMsg->lParam, pid);
-        }
-    }
-    return CallNextHookEx(g_hCallWndProcHook, nCode, wParam, lParam);
 }
 
 // ========== DLL 入口 ==========
