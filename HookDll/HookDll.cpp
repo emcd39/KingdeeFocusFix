@@ -32,7 +32,7 @@ struct SharedData {
 static HANDLE g_hSharedMem = NULL;
 static SharedData* g_pShared = nullptr;
 static const wchar_t* SHARED_MEM_NAME = L"KingdeeFocusFix_SharedMem";
-static const int ALT_BLOCK_WINDOW_MS = 2000;  // 每次阻止后 2s 内继续阻止
+static const int ALT_BLOCK_WINDOW_MS = 2000;
 
 static void InitSharedMemory() {
     // 尝试打开已存在的共享内存，如果不存在则创建
@@ -166,13 +166,65 @@ static bool ShouldBlock() {
 // ========== Hook Detours ==========
 
 static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BOOL fAttach) {
+    return fpAttachThreadInput(idAttach, idAttachTo, fAttach);
+}
+
+static BOOL WINAPI Detour_BringWindowToTop(HWND hWnd) {
     bool block = ShouldBlock();
-    Log("[AttachThreadInput] idAttach=%d, idAttachTo=%d, fAttach=%d, block=%d\n",
-        idAttach, idAttachTo, fAttach, block);
-    if (fAttach && block) {
-        Log("[AttachThreadInput] BLOCKED!\n");
+    Log("[BringWindowToTop] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
+        Log("[BringWindowToTop] BLOCKED!\n");
         return FALSE;
     }
+    return fpBringWindowToTop(hWnd);
+}
+
+static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
+    bool block = ShouldBlock();
+    Log("[SetForegroundWindow] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
+        Log("[SetForegroundWindow] BLOCKED!\n");
+        return FALSE;
+    }
+    return fpSetForegroundWindow(hWnd);
+}
+
+static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
+    return fpSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+}
+
+static HWND WINAPI Detour_SetFocus(HWND hWnd) {
+    return fpSetFocus(hWnd);
+}
+
+static HWND WINAPI Detour_SetActiveWindow(HWND hWnd) {
+    bool block = ShouldBlock();
+    Log("[SetActiveWindow] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
+        Log("[SetActiveWindow] BLOCKED!\n");
+        return NULL;
+    }
+    return fpSetActiveWindow(hWnd);
+}
+
+// SwitchToThisWindow - 关键！用友通过这个 API 绕过我们的 Hook
+static void WINAPI Detour_SwitchToThisWindow(HWND hwnd, BOOL fAltTab) {
+    bool block = ShouldBlock();
+    Log("[SwitchToThisWindow] hwnd=%p, fAltTab=%d, block=%d\n", hwnd, fAltTab, block);
+    if (block) {
+        Log("[SwitchToThisWindow] BLOCKED!\n");
+        return;
+    }
+    fpSwitchToThisWindow(hwnd, fAltTab);
+}
+
+static BOOL WINAPI Detour_ShowWindow(HWND hWnd, int nCmdShow) {
+    return fpShowWindow(hWnd, nCmdShow);
+}
+
+static BOOL WINAPI Detour_MoveWindow(HWND hWnd, int X, int Y, int nWidth, int nHeight, BOOL bRepaint) {
+    return fpMoveWindow(hWnd, X, Y, nWidth, nHeight, bRepaint);
+}
     return fpAttachThreadInput(idAttach, idAttachTo, fAttach);
 }
 
