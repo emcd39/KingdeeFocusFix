@@ -400,6 +400,7 @@ static bool WasAltRecentlyPressedCBT() {
 }
 
 static HWND g_hLastForeground = NULL;  // 记录上一个前台窗口
+static HWINEVENTHOOK g_hEventHook = NULL;  // 焦点监控钩子
 
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HCBT_ACTIVATE) {
@@ -439,10 +440,6 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
 }
 
-// ========== 全局变量 ==========
-static HWND g_hLastForeground = NULL;  // 记录上一个前台窗口
-static HWINEVENTHOOK g_hEventHook = NULL;  // 焦点监控钩子
-
 // ========== 焦点监控回调 ==========
 static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
@@ -462,9 +459,10 @@ static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
                 do {
                     if (pe.th32ProcessID == pid) {
                         wchar_t name[MAX_PATH];
-                        for (int i = 0; pe.szExeFile[i]; i++)
-                            name[i] = (wchar_t)towlower(pe.szExeFile[i]);
-                        name[i] = 0;
+                        int j = 0;
+                        for (j = 0; pe.szExeFile[j]; j++)
+                            name[j] = (wchar_t)towlower(pe.szExeFile[j]);
+                        name[j] = 0;
                         isYonyou = (wcscmp(name, L"enterpriseportal.exe") == 0);
                         break;
                     }
