@@ -150,14 +150,13 @@ static bool IsAltDown() {
 // 检查并阻止：如果 Alt 在最近 N ms 内被按下过，则阻止并刷新时间戳
 static bool ShouldBlock() {
     if (!g_pShared) return false;
-    DWORD pressTime = (DWORD)InterlockedCompareExchange(&g_pShared->altPressTime, 0, 0);
+    DWORD pressTime = g_pShared->altPressTime;
     if (pressTime == 0) return false;
     DWORD now = GetTickCount();
     DWORD elapsed = now - pressTime;
     if (elapsed < ALT_BLOCK_WINDOW_MS) {
-        // 刷新时间戳，延长阻止窗口
-        InterlockedExchange(&g_pShared->altPressTime, now);
-        Log("[ShouldBlock] BLOCK elapsed=%lu, refreshed timestamp\n", elapsed);
+        g_pShared->altPressTime = now;
+        Log("[ShouldBlock] BLOCK elapsed=%lu, wrote=%lu\n", elapsed, now);
         return true;
     }
     return false;
