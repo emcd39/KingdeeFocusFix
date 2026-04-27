@@ -507,11 +507,11 @@ extern "C" HOOKDLL_API BOOL InstallCbtHook(DWORD threadId) {
     g_hCbtHook = SetWindowsHookEx(WH_CBT, CbtProc, g_hMod, threadId);
     Log("[InstallCbtHook] g_hCbtHook=%p\n", g_hCbtHook);
     
-    // 安装焦点监控钩子
+    // 安装焦点监控钩子（监控所有进程的焦点变化）
     g_hEventHook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-        NULL, WinEventProc, 0, 0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        g_hMod, WinEventProc, 0, 0,
+        WINEVENT_OUTOFCONTEXT);
     Log("[InstallCbtHook] g_hEventHook=%p\n", g_hEventHook);
     
     return g_hCbtHook != NULL;
