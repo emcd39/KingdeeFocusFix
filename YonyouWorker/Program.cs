@@ -13,6 +13,26 @@ namespace YonyouWorker
         [DllImport("HookDll32.dll", CallingConvention = CallingConvention.Cdecl)]
         static extern void UninstallCbtHook();
 
+        [DllImport("user32.dll")]
+        static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        static extern bool TranslateMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public System.Drawing.Point pt;
+        }
+
         static void Main(string[] args)
         {
             if (!IsAdmin())
@@ -34,10 +54,15 @@ namespace YonyouWorker
                 Environment.Exit(3);
             }
 
-            Console.WriteLine("[YonyouWorker] 用友 MinHook 钩子已安装");
+            Console.WriteLine("[YonyouWorker] 用友钩子已安装，消息循环运行中...");
 
-            // 无限等待，直到被父进程终止
-            Thread.Sleep(Timeout.Infinite);
+            // 消息循环 - 处理 SetWinEventHook 的回调
+            MSG msg;
+            while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
         }
 
         static bool IsAdmin()

@@ -9,4 +9,8 @@
     <RootNamespace>YonyouWorker</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
 </Project>
