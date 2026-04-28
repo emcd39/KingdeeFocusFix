@@ -8,6 +8,8 @@ class Program
 {
     [DllImport("HookDll.dll")] static extern bool InstallHook();
     [DllImport("HookDll.dll")] static extern bool UninstallHook();
+    [DllImport("HookDll.dll")] static extern bool InstallKeyboardHook();
+    [DllImport("HookDll.dll")] static extern bool UninstallKeyboardHook();
 
     [STAThread]
     static void Main()
@@ -31,6 +33,15 @@ class Program
             return;
         }
 
+        if (!InstallKeyboardHook())
+        {
+            MessageBox.Show(
+                "键盘钩子安装失败！\n请确认以【管理员身份】运行。",
+                "金蝶焦点修复", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UninstallHook();
+            return;
+        }
+
         NotifyIcon tray = new NotifyIcon();
         tray.Icon = SystemIcons.Shield;
         tray.Text = "金蝶报表焦点修复（运行中）";
@@ -47,6 +58,7 @@ class Program
         Application.Run();
 
         UninstallHook();
+        UninstallKeyboardHook();
         tray.Visible = false;
     }
 }

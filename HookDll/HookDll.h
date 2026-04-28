@@ -8,4 +8,6 @@
 extern "C" {
     HOOKDLL_API BOOL InstallHook();
     HOOKDLL_API BOOL UninstallHook();
+    HOOKDLL_API BOOL InstallKeyboardHook();
+    HOOKDLL_API BOOL UninstallKeyboardHook();
 }

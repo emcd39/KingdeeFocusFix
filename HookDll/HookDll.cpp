@@ -5,6 +5,7 @@
 
 #pragma data_seg(".SHARED")
 HHOOK g_hook = NULL;
+HHOOK g_keyboardHook = NULL;
 #pragma data_seg()
 #pragma comment(linker, "/SECTION:.SHARED,RWS")
 
@@ -42,6 +43,45 @@ static bool IsKDSReport(HWND hwnd)
     return found;
 }
 
+static bool IsYonyou(HWND hwnd)
+{
+    if (!hwnd) return false;
+
+    // 检查窗口类名
+    wchar_t className[256];
+    GetClassNameW(hwnd, className, sizeof(className) / sizeof(className[0]));
+    if (wcscmp(className, L"ThunderRT6FormDC") != 0)
+        return false;
+
+    // 检查进程名
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid) return false;
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+    bool found = false;
+
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID == pid) {
+                wchar_t name[MAX_PATH];
+                int i = 0;
+                for (i = 0; pe.szExeFile[i]; i++)
+                    name[i] = (wchar_t)towlower(pe.szExeFile[i]);
+                name[i] = 0;
+                found = (wcscmp(name, L"enterpriseportal.exe") == 0);
+                break;
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
+}
+
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam)
 {
     if (code == HCBT_ACTIVATE)
@@ -56,6 +96,43 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam)
         }
     }
     return CallNextHookEx(g_hook, code, wParam, lParam);
+}
+
+static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
+{
+    if (code == HC_ACTION)
+    {
+        KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
+
+        if (wParam == WM_KEYDOWN && p->vkCode == VK_TAB)
+        {
+            bool altDown = ((GetAsyncKeyState(VK_LMENU) & 0x8000) != 0)
+                        || ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
+
+            if (altDown)
+            {
+                HWND hwnd = GetForegroundWindow();
+                if (IsYonyou(hwnd))
+                {
+                    INPUT inputs[4] = {};
+                    inputs[0].type = INPUT_KEYBOARD;
+                    inputs[0].ki.wVk = VK_TAB;
+                    inputs[1].type = INPUT_KEYBOARD;
+                    inputs[1].ki.wVk = VK_TAB;
+                    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+                    inputs[2].type = INPUT_KEYBOARD;
+                    inputs[2].ki.wVk = VK_TAB;
+                    inputs[3].type = INPUT_KEYBOARD;
+                    inputs[3].ki.wVk = VK_TAB;
+                    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(4, inputs, sizeof(INPUT));
+
+                    return 1;
+                }
+            }
+        }
+    }
+    return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
 }
 
 BOOL APIENTRY DllMain(HMODULE hMod, DWORD reason, LPVOID reserved)
@@ -77,5 +154,20 @@ extern "C" HOOKDLL_API BOOL UninstallHook()
     if (!g_hook) return TRUE;
     BOOL ok = UnhookWindowsHookEx(g_hook);
     g_hook = NULL;
+    return ok;
+}
+
+extern "C" HOOKDLL_API BOOL InstallKeyboardHook()
+{
+    if (g_keyboardHook) return TRUE;
+    g_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, g_hMod, 0);
+    return g_keyboardHook != NULL;
+}
+
+extern "C" HOOKDLL_API BOOL UninstallKeyboardHook()
+{
+    if (!g_keyboardHook) return TRUE;
+    BOOL ok = UnhookWindowsHookEx(g_keyboardHook);
+    g_keyboardHook = NULL;
     return ok;
 }
