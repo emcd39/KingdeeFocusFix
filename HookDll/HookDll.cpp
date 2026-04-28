@@ -402,6 +402,8 @@ static bool WasAltRecentlyPressedCBT() {
 
 static HWND g_hLastForeground = NULL;
 static HWINEVENTHOOK g_hEventHook = NULL;
+static DWORD g_lastYonyouBlockTime = 0;
+static const int YONYOU_BLOCK_COOLDOWN_MS = 500;
 
 static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
@@ -468,9 +470,17 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         }
 
         // 阻止用友在 Alt+Tab 期间激活自己的窗口（用友通过 HCBT_ACTIVATE 直接激活，不走 MinHook API）
+        // 使用冷却期避免用友重试导致的焦点争夺
         if ((altDown || altRecent) && isYonyou) {
-            Log("[CbtProc] BLOCKED Yonyou activation during Alt+Tab!\n");
-            return 1;
+            DWORD now = GetTickCount();
+            DWORD elapsed = now - g_lastYonyouBlockTime;
+            if (elapsed > YONYOU_BLOCK_COOLDOWN_MS) {
+                g_lastYonyouBlockTime = now;
+                Log("[CbtProc] BLOCKED Yonyou activation during Alt+Tab! (cooldown=%lu)\n", elapsed);
+                return 1;
+            } else {
+                Log("[CbtProc] Yonyou retry within cooldown (%lu ms), allowing\n", elapsed);
+            }
         }
 
         // 离开用友时刷新时间戳，让 MinHook 阻止用友的 SetForegroundWindow 调用
