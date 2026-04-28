@@ -467,14 +467,10 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
             return 1;
         }
 
-        // 阻止用友：用户在用友界面中 + 目标窗口不属于用友
+        // 用友：记录时间戳，让 MinHook 处理（不在 CBT 中阻止）
         if ((altDown || altRecent) && yonyouFocused && !isYonyou) {
-            Log("[CbtProc] BLOCKED leaving Yonyou! target=%p\n", hwnd);
-            if (g_hLastForeground && IsWindow(g_hLastForeground)) {
-                PostMessage(g_hLastForeground, WM_ACTIVATE, WA_ACTIVE, 0);
-                Log("[CbtProc] Restoring focus to %p\n", g_hLastForeground);
-            }
-            return 1;
+            Log("[CbtProc] Yonyou leaving detected, refreshing timestamp for MinHook\n");
+            RecordAltPress();
         }
     }
     return CallNextHookEx(g_hCbtHook, code, wParam, lParam);
