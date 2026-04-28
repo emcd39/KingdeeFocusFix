@@ -112,18 +112,20 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
             if (altDown)
             {
                 HWND hwnd = GetForegroundWindow();
-                if (IsYonyou(hwnd))
+                int tabCount = IsYonyou(hwnd) ? 2 : 1;
+
+                INPUT inputs[4] = {};
+                for (int i = 0; i < tabCount; i++)
                 {
-                    INPUT input = {};
-                    input.type = INPUT_KEYBOARD;
-                    input.ki.wVk = VK_TAB;
-                    SendInput(1, &input, sizeof(INPUT));
-
-                    input.ki.dwFlags = KEYEVENTF_KEYUP;
-                    SendInput(1, &input, sizeof(INPUT));
-
-                    return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
+                    inputs[i * 2].type = INPUT_KEYBOARD;
+                    inputs[i * 2].ki.wVk = VK_TAB;
+                    inputs[i * 2 + 1].type = INPUT_KEYBOARD;
+                    inputs[i * 2 + 1].ki.wVk = VK_TAB;
+                    inputs[i * 2 + 1].ki.dwFlags = KEYEVENTF_KEYUP;
                 }
+                SendInput(tabCount * 2, inputs, sizeof(INPUT));
+
+                return 1;
             }
         }
     }
