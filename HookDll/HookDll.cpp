@@ -148,18 +148,30 @@ static bool IsAltDown() {
            (GetAsyncKeyState(VK_RMENU) & 0x8000);
 }
 
-// 检查并阻止：如果 Alt 在最近 N ms 内被按下过，则阻止并刷新时间戳
+// 检查并阻止用友的焦点抢占 API
+// 阻止条件：1) Alt 最近被按下过  或  2) 用户不在用友界面中
 static bool ShouldBlock() {
     if (!g_pShared) return false;
+    
+    // 条件1：Alt 最近被按下过（Alt+Tab 期间）
     DWORD pressTime = g_pShared->altPressTime;
-    if (pressTime == 0) return false;
-    DWORD now = GetTickCount();
-    DWORD elapsed = now - pressTime;
-    if (elapsed < ALT_BLOCK_WINDOW_MS) {
-        g_pShared->altPressTime = now;
-        Log("[ShouldBlock] BLOCK elapsed=%lu, wrote=%lu\n", elapsed, now);
+    if (pressTime != 0) {
+        DWORD now = GetTickCount();
+        DWORD elapsed = now - pressTime;
+        if (elapsed < ALT_BLOCK_WINDOW_MS) {
+            g_pShared->altPressTime = now;
+            Log("[ShouldBlock] BLOCK (altRecent) elapsed=%lu\n", elapsed);
+            return true;
+        }
+    }
+    
+    // 条件2：用户不在用友界面中（已切换到其他窗口）
+    LONG focused = InterlockedCompareExchange(&g_pShared->yonyouFocused, 0, 0);
+    if (focused == 0) {
+        Log("[ShouldBlock] BLOCK (not focused)\n");
         return true;
     }
+    
     return false;
 }
 
