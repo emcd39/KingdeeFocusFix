@@ -494,6 +494,19 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 extern "C" HOOKDLL_API BOOL InstallCbtHook(DWORD threadId) {
     Log("[InstallCbtHook] threadId=%d\n", threadId);
     if (g_hCbtHook) return TRUE;
+    
+    // 初始化 yonyouFocused：检查当前前台窗口是否是用友
+    // 解决钩子安装时用友已在前台但 yonyouFocused=0 的问题
+    if (g_pShared) {
+        HWND hForeground = GetForegroundWindow();
+        if (hForeground && IsYonyouWindow(hForeground)) {
+            InterlockedExchange(&g_pShared->yonyouFocused, 1);
+            Log("[InstallCbtHook] Foreground is Yonyou, set yonyouFocused=1\n");
+        } else {
+            Log("[InstallCbtHook] Foreground is not Yonyou (hwnd=%p), yonyouFocused stays 0\n", hForeground);
+        }
+    }
+    
     g_hCbtHook = SetWindowsHookEx(WH_CBT, CbtProc, g_hMod, threadId);
     Log("[InstallCbtHook] g_hCbtHook=%p\n", g_hCbtHook);
     
