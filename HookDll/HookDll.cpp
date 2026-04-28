@@ -196,22 +196,12 @@ static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
 }
 
 static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
-    bool block = ShouldBlock();
-    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=0x%x, block=%d\n", hWnd, hWndInsertAfter, uFlags, block);
-    if (block) {
-        Log("[SetWindowPos] BLOCKED!\n");
-        return FALSE;
-    }
+    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=0x%x\n", hWnd, hWndInsertAfter, uFlags);
     return fpSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
 static HWND WINAPI Detour_SetFocus(HWND hWnd) {
-    bool block = ShouldBlock();
-    Log("[SetFocus] hWnd=%p, block=%d\n", hWnd, block);
-    if (block) {
-        Log("[SetFocus] BLOCKED!\n");
-        return NULL;
-    }
+    Log("[SetFocus] hWnd=%p\n", hWnd);
     return fpSetFocus(hWnd);
 }
 
@@ -237,12 +227,7 @@ static void WINAPI Detour_SwitchToThisWindow(HWND hwnd, BOOL fAltTab) {
 }
 
 static BOOL WINAPI Detour_ShowWindow(HWND hWnd, int nCmdShow) {
-    bool block = ShouldBlock();
-    Log("[ShowWindow] hWnd=%p, nCmdShow=%d, block=%d\n", hWnd, nCmdShow, block);
-    if (block) {
-        Log("[ShowWindow] BLOCKED!\n");
-        return FALSE;
-    }
+    Log("[ShowWindow] hWnd=%p, nCmdShow=%d\n", hWnd, nCmdShow);
     return fpShowWindow(hWnd, nCmdShow);
 }
 
@@ -438,8 +423,6 @@ static bool WasAltRecentlyPressedCBT() {
 
 static HWND g_hLastForeground = NULL;
 static HWINEVENTHOOK g_hEventHook = NULL;
-static DWORD g_lastYonyouBlockTime = 0;
-static const int YONYOU_BLOCK_COOLDOWN_MS = 500;
 
 static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
@@ -506,17 +489,9 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         }
 
         // 阻止用友在 Alt+Tab 期间激活自己的窗口（用友通过 HCBT_ACTIVATE 直接激活，不走 MinHook API）
-        // 使用冷却期避免用友重试导致的焦点争夺
         if ((altDown || altRecent) && isYonyou) {
-            DWORD now = GetTickCount();
-            DWORD elapsed = now - g_lastYonyouBlockTime;
-            if (elapsed > YONYOU_BLOCK_COOLDOWN_MS) {
-                g_lastYonyouBlockTime = now;
-                Log("[CbtProc] BLOCKED Yonyou activation during Alt+Tab! (cooldown=%lu)\n", elapsed);
-                return 1;
-            } else {
-                Log("[CbtProc] Yonyou retry within cooldown (%lu ms), allowing\n", elapsed);
-            }
+            Log("[CbtProc] BLOCKED Yonyou activation during Alt+Tab!\n");
+            return 1;
         }
 
         // 离开用友时刷新时间戳，让 MinHook 阻止用友的 SetForegroundWindow 调用
