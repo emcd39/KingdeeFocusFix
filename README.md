@@ -1,27 +1,38 @@
 # KingdeeFocusFix
 
-> 金蝶云·星空财务报表系统（`Kingdee.BOS.KDSReport.exe`）在 Windows 10/11 下 Alt+Tab 切换窗口时，会抢占焦点导致任务切换器选中位置被重置，需要多按一次 Tab 才能切走。本工具通过 Windows CBT 全局钩子在消息级别拦截该行为，完全还原正常的 Alt+Tab 体验。
+> Windows 系统级窗口切换修复工具，解决金蝶云·星空和用友 ERP 的 Alt+Tab 异常问题。
+
+---
+
+## 功能
+
+| 功能 | 说明 |
+|------|------|
+| 金蝶焦点修复 | 拦截金蝶报表系统抢占焦点行为，还原正常 Alt+Tab 体验 |
+| 用友窗口跳过 | 在用友界面按 Alt+Tab 时自动跳过一个窗口（等效按两次 Tab） |
 
 ---
 
 ## 问题描述
+
+### 金蝶报表焦点抢占
 
 | 环境 | 现象 |
 |------|------|
 | Windows 7 | 正常 |
 | Windows 10 / 11 | 按下 Alt+Tab 后，任务切换界面闪一下，选中位置重置，需多按一次 Tab |
 
-### 根本原因
+**根本原因**：金蝶报表系统在窗口失去焦点时会调用 `SetForegroundWindow`，在 Alt 抬起后 50ms 内抢占前台。
 
-金蝶报表系统基于 WinForms 开发，在窗口失去焦点时会触发内部的 `SetForegroundWindow` 调用。Windows 10/11 收紧了 DWM 合成器的焦点策略，导致该调用在 Alt 抬起后 **50ms 以内**成功抢占前台，打断了任务切换器的选中状态。
+### 用友 ERP 窗口切换
 
-经诊断确认，`Kingdee.BOS.KDSReport.exe`（hwnd 类名：`WindowsForms10.Window.8.app.0.261f82a_r10_ad1`）在每次 Alt 抬起后立即成为前台窗口，任何基于轮询的方案（如 AutoHotkey 定时器）均因延迟过大而无法拦截。
+用友 ERP（`EnterprisePortal.exe`）的子窗口在 Alt+Tab 时行为异常，需要按两次 Tab 才能切换到下一个窗口。本工具自动发送额外的 Tab 按键，实现一次 Alt+Tab 跳过用友窗口。
 
 ---
 
 ## 解决方案
 
-使用 **Windows `WH_CBT` 全局钩子**，在 `HCBT_ACTIVATE` 消息层面拦截。
+### 金蝶焦点修复：WH_CBT 全局钩子
 
 ```
 Alt 抬起
@@ -31,7 +42,16 @@ Alt 抬起
             └→ 否：CallNextHookEx 放行
 ```
 
-`WH_CBT` 钩子工作在消息队列层，比窗口真正获得焦点还早一步，彻底解决了轮询方案追不上的问题。
+### 用友窗口跳过：WH_KEYBOARD_LL 低级键盘钩子
+
+```
+Alt+Tab 按下
+  └→ KeyboardProc 检测：前台窗口是用友？
+       ├→ 是：发送额外 Tab 键（实现跳过效果）
+       └→ 否：正常放行
+```
+
+通过 `LLKHF_INJECTED` 标志区分真实键盘事件和模拟事件，避免递归触发。
 
 ---
 
@@ -113,7 +133,7 @@ HookDll.dll
 
 ## 技术细节
 
-### CBT 钩子拦截逻辑
+### CBT 钩子拦截逻辑（金蝶修复）
 
 ```cpp
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam)
@@ -125,15 +145,53 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam)
                     || ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
 
         if (altDown && IsKDSReport(hwnd))
-            return 1;  // 阻断激活
+            return 1;
     }
     return CallNextHookEx(g_hook, code, wParam, lParam);
 }
 ```
 
-- `HCBT_ACTIVATE`：窗口**即将**被激活时触发，此时激活尚未发生，返回非零可阻断
-- `GetAsyncKeyState`：检测 Alt 键实时状态，确保只在 Alt+Tab 场景下介入，不影响正常点击金蝶窗口
-- `IsKDSReport`：通过进程快照（`CreateToolhelp32Snapshot`）核验目标进程名，精确匹配
+### 键盘钩子逻辑（用友跳过）
+
+```cpp
+static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
+{
+    if (code == HC_ACTION)
+    {
+        KBDLLHOOKSTRUCT* kb = (KBDLLHOOKSTRUCT*)lParam;
+        bool isInjected = (kb->flags & LLKHF_INJECTED) != 0;
+
+        if (!isInjected)
+        {
+            // 追踪真实 Alt 键状态
+            if (kb->vkCode == VK_LMENU || kb->vkCode == VK_RMENU)
+            {
+                if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
+                    g_realAltDown = true;
+                else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
+                    g_realAltDown = false;
+            }
+
+            // 检测用友窗口的 Alt+Tab
+            if (kb->vkCode == VK_TAB && g_realAltDown)
+            {
+                HWND fgWnd = GetForegroundWindow();
+                if (IsYonyouWindow(fgWnd))
+                {
+                    INPUT inputs[1] = {};
+                    inputs[0].type = INPUT_KEYBOARD;
+                    inputs[0].ki.wVk = VK_TAB;
+                    SendInput(1, inputs, sizeof(INPUT));
+                }
+            }
+        }
+    }
+    return CallNextHookEx(g_kbHook, code, wParam, lParam);
+}
+```
+
+- `LLKHF_INJECTED`：区分真实键盘事件和模拟事件，避免递归触发
+- `g_realAltDown`：只在真实事件时更新，不受模拟事件干扰
 
 ### 共享数据段
 
@@ -152,7 +210,7 @@ HHOOK g_hook = NULL;
 
 | 项目 | 说明 |
 |------|------|
-| 目标程序 | 金蝶云·星空财务报表系统 `Kingdee.BOS.KDSReport.exe` |
+| 目标程序 | 金蝶云·星空 `Kingdee.BOS.KDSReport.exe`、用友 ERP `EnterprisePortal.exe` |
 | 操作系统 | Windows 10 / Windows 11 |
 | 架构 | x64 |
 | 运行时 | .NET Framework 4.8（系统自带） |

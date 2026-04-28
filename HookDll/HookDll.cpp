@@ -63,14 +63,7 @@ static bool IsYonyouWindow(HWND hwnd)
     wchar_t name[MAX_PATH];
     if (!GetProcessName(pid, name, MAX_PATH)) return false;
 
-    wchar_t debug[512];
-    wsprintfW(debug, L"Window: class=%s, process=%s\n", className, name);
-    OutputDebugStringW(debug);
-
-    if (wcsstr(className, L"ThunderRT6") != NULL && wcscmp(name, L"enterpriseportal.exe") == 0)
-        return true;
-
-    return false;
+    return wcsstr(className, L"ThunderRT6") != NULL && wcscmp(name, L"enterpriseportal.exe") == 0;
 }
 
 static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
@@ -95,8 +88,6 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                 HWND fgWnd = GetForegroundWindow();
                 if (IsYonyouWindow(fgWnd))
                 {
-                    OutputDebugStringW(L"Yonyou Alt+Tab detected, sending extra Tab\n");
-
                     INPUT inputs[1] = {};
                     inputs[0].type = INPUT_KEYBOARD;
                     inputs[0].ki.wVk = VK_TAB;
