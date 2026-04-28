@@ -27,6 +27,7 @@ static void Log(const char* fmt, ...) {
 // 用于在 YonyouWorker 和 EnterprisePortal 之间共享 Alt 按下时间戳
 struct SharedData {
     volatile LONG altPressTime;  // Alt 按下的时间戳 (GetTickCount)
+    volatile LONG yonyouFocused; // 用户是否在用友界面中
 };
 
 static HANDLE g_hSharedMem = NULL;
@@ -401,7 +402,6 @@ static bool WasAltRecentlyPressedCBT() {
 
 static HWND g_hLastForeground = NULL;
 static HWINEVENTHOOK g_hEventHook = NULL;
-static bool g_bYonyouFocused = false;  // 用户是否在用友界面中
 
 static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
@@ -434,10 +434,10 @@ static void CALLBACK WinEventProc(HWINEVENTHOOK hHook, DWORD event, HWND hwnd,
     }
     
     if (isYonyou) {
-        g_bYonyouFocused = true;
-        Log("[WinEventProc] Yonyou window got focus, setting g_bYonyouFocused=true\n");
+        if (g_pShared) InterlockedExchange(&g_pShared->yonyouFocused, 1);
+        Log("[WinEventProc] Yonyou window got focus\n");
     } else {
-        g_bYonyouFocused = false;
+        if (g_pShared) InterlockedExchange(&g_pShared->yonyouFocused, 0);
         g_hLastForeground = hwnd;
         Log("[WinEventProc] Non-Yonyou window got focus: %p, pid=%lu\n", hwnd, pid);
     }
@@ -452,8 +452,10 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         bool isYonyou = IsYonyouWindow(hwnd);
         bool altRecent = WasAltRecentlyPressedCBT();
 
+        bool yonyouFocused = g_pShared ? (InterlockedCompareExchange(&g_pShared->yonyouFocused, 0, 0) != 0) : false;
+
         Log("[CbtProc] HCBT_ACTIVATE hwnd=%p, altDown=%d, isKingdee=%d, isYonyou=%d, altRecent=%d, yonyouFocused=%d, lastFg=%p\n",
-            hwnd, altDown, isKingdee, isYonyou, altRecent, g_bYonyouFocused, g_hLastForeground);
+            hwnd, altDown, isKingdee, isYonyou, altRecent, yonyouFocused, g_hLastForeground);
 
         if (altDown) {
             RecordAltPress();
@@ -466,7 +468,7 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
         }
 
         // 阻止用友：用户在用友界面中 + 目标窗口不属于用友
-        if ((altDown || altRecent) && g_bYonyouFocused && !isYonyou) {
+        if ((altDown || altRecent) && yonyouFocused && !isYonyou) {
             Log("[CbtProc] BLOCKED leaving Yonyou! target=%p\n", hwnd);
             if (g_hLastForeground && IsWindow(g_hLastForeground)) {
                 PostMessage(g_hLastForeground, WM_ACTIVATE, WA_ACTIVE, 0);
