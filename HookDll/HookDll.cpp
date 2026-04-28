@@ -10,8 +10,7 @@ HHOOK g_hook = NULL;
 
 static HMODULE g_hMod = NULL;
 static HHOOK g_kbHook = NULL;
-static bool g_altDown = false;
-static bool g_suppressNext = false;
+static bool g_realAltDown = false;
 
 static bool GetProcessName(DWORD pid, wchar_t* name, int maxLen)
 {
@@ -69,47 +68,45 @@ static bool IsYonyouWindow(HWND hwnd)
 
 static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 {
-    if (code == HC_ACTION && !g_suppressNext)
+    if (code == HC_ACTION)
     {
         KBDLLHOOKSTRUCT* kb = (KBDLLHOOKSTRUCT*)lParam;
+        bool isInjected = (kb->flags & LLKHF_INJECTED) != 0;
 
-        if (kb->vkCode == VK_LMENU || kb->vkCode == VK_RMENU)
+        if (!isInjected)
         {
-            if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
-                g_altDown = true;
-            else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
-                g_altDown = false;
-        }
-
-        if (kb->vkCode == VK_TAB && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && g_altDown)
-        {
-            HWND fgWnd = GetForegroundWindow();
-            if (IsYonyouWindow(fgWnd))
+            if (kb->vkCode == VK_LMENU || kb->vkCode == VK_RMENU)
             {
-                // 防止递归触发
-                g_suppressNext = true;
+                if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
+                    g_realAltDown = true;
+                else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
+                    g_realAltDown = false;
+            }
 
-                // 发送Alt+Tab+Tab（跳过一个窗口）
-                INPUT inputs[4] = {};
+            if (kb->vkCode == VK_TAB && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && g_realAltDown)
+            {
+                HWND fgWnd = GetForegroundWindow();
+                if (IsYonyouWindow(fgWnd))
+                {
+                    INPUT inputs[4] = {};
 
-                inputs[0].type = INPUT_KEYBOARD;
-                inputs[0].ki.wVk = VK_MENU;
+                    inputs[0].type = INPUT_KEYBOARD;
+                    inputs[0].ki.wVk = VK_MENU;
 
-                inputs[1].type = INPUT_KEYBOARD;
-                inputs[1].ki.wVk = VK_TAB;
+                    inputs[1].type = INPUT_KEYBOARD;
+                    inputs[1].ki.wVk = VK_TAB;
 
-                inputs[2].type = INPUT_KEYBOARD;
-                inputs[2].ki.wVk = VK_TAB;
+                    inputs[2].type = INPUT_KEYBOARD;
+                    inputs[2].ki.wVk = VK_TAB;
 
-                inputs[3].type = INPUT_KEYBOARD;
-                inputs[3].ki.wVk = VK_MENU;
-                inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+                    inputs[3].type = INPUT_KEYBOARD;
+                    inputs[3].ki.wVk = VK_MENU;
+                    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
 
-                SendInput(4, inputs, sizeof(INPUT));
+                    SendInput(4, inputs, sizeof(INPUT));
 
-                g_suppressNext = false;
-
-                return 1;
+                    return 1;
+                }
             }
         }
     }
@@ -173,6 +170,6 @@ extern "C" HOOKDLL_API BOOL UninstallHook()
         g_hook = NULL;
     }
 
-    g_altDown = false;
+    g_realAltDown = false;
     return ok;
 }
