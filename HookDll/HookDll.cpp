@@ -55,7 +55,6 @@ static bool IsYonyouWindow(HWND hwnd)
 
     wchar_t className[256];
     if (!GetClassNameW(hwnd, className, 256)) return false;
-    if (_wcsicmp(className, L"ThunderRT6FormDC") != 0) return false;
 
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -63,7 +62,15 @@ static bool IsYonyouWindow(HWND hwnd)
 
     wchar_t name[MAX_PATH];
     if (!GetProcessName(pid, name, MAX_PATH)) return false;
-    return (wcscmp(name, L"enterpriseportal.exe") == 0);
+
+    wchar_t debug[512];
+    wsprintfW(debug, L"Window: class=%s, process=%s\n", className, name);
+    OutputDebugStringW(debug);
+
+    if (wcsstr(className, L"ThunderRT6") != NULL && wcscmp(name, L"enterpriseportal.exe") == 0)
+        return true;
+
+    return false;
 }
 
 static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
@@ -88,24 +95,13 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                 HWND fgWnd = GetForegroundWindow();
                 if (IsYonyouWindow(fgWnd))
                 {
-                    INPUT inputs[4] = {};
+                    OutputDebugStringW(L"Yonyou Alt+Tab detected, sending extra Tab\n");
 
+                    INPUT inputs[1] = {};
                     inputs[0].type = INPUT_KEYBOARD;
-                    inputs[0].ki.wVk = VK_MENU;
+                    inputs[0].ki.wVk = VK_TAB;
 
-                    inputs[1].type = INPUT_KEYBOARD;
-                    inputs[1].ki.wVk = VK_TAB;
-
-                    inputs[2].type = INPUT_KEYBOARD;
-                    inputs[2].ki.wVk = VK_TAB;
-
-                    inputs[3].type = INPUT_KEYBOARD;
-                    inputs[3].ki.wVk = VK_MENU;
-                    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-
-                    SendInput(4, inputs, sizeof(INPUT));
-
-                    return 1;
+                    SendInput(1, inputs, sizeof(INPUT));
                 }
             }
         }
