@@ -166,6 +166,12 @@ static bool ShouldBlock() {
 // ========== Hook Detours ==========
 
 static BOOL WINAPI Detour_AttachThreadInput(DWORD idAttach, DWORD idAttachTo, BOOL fAttach) {
+    bool block = ShouldBlock();
+    Log("[AttachThreadInput] idAttach=%lu, idAttachTo=%lu, fAttach=%d, block=%d\n", idAttach, idAttachTo, fAttach, block);
+    if (block) {
+        Log("[AttachThreadInput] BLOCKED!\n");
+        return FALSE;
+    }
     return fpAttachThreadInput(idAttach, idAttachTo, fAttach);
 }
 
@@ -190,10 +196,22 @@ static BOOL WINAPI Detour_SetForegroundWindow(HWND hWnd) {
 }
 
 static BOOL WINAPI Detour_SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
+    bool block = ShouldBlock();
+    Log("[SetWindowPos] hWnd=%p, insertAfter=%p, flags=0x%x, block=%d\n", hWnd, hWndInsertAfter, uFlags, block);
+    if (block) {
+        Log("[SetWindowPos] BLOCKED!\n");
+        return FALSE;
+    }
     return fpSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
 static HWND WINAPI Detour_SetFocus(HWND hWnd) {
+    bool block = ShouldBlock();
+    Log("[SetFocus] hWnd=%p, block=%d\n", hWnd, block);
+    if (block) {
+        Log("[SetFocus] BLOCKED!\n");
+        return NULL;
+    }
     return fpSetFocus(hWnd);
 }
 
@@ -219,6 +237,12 @@ static void WINAPI Detour_SwitchToThisWindow(HWND hwnd, BOOL fAltTab) {
 }
 
 static BOOL WINAPI Detour_ShowWindow(HWND hWnd, int nCmdShow) {
+    bool block = ShouldBlock();
+    Log("[ShowWindow] hWnd=%p, nCmdShow=%d, block=%d\n", hWnd, nCmdShow, block);
+    if (block) {
+        Log("[ShowWindow] BLOCKED!\n");
+        return FALSE;
+    }
     return fpShowWindow(hWnd, nCmdShow);
 }
 
@@ -232,11 +256,23 @@ static HHOOK g_hCallWndProcHook = NULL;
 static LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0) {
         CWPSTRUCT* pMsg = (CWPSTRUCT*)lParam;
-        if (pMsg->message == WM_ACTIVATE) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(pMsg->hwnd, &pid);
-            Log("[CallWndProc] WM_ACTIVATE hwnd=%p, wParam=%p, lParam=%p, pid=%lu\n",
-                pMsg->hwnd, (void*)pMsg->wParam, (void*)pMsg->lParam, pid);
+        DWORD pid = 0;
+        GetWindowThreadProcessId(pMsg->hwnd, &pid);
+        
+        // 只记录用友进程的消息
+        if (pid == 9212 || pid == 21200) {  // 用友进程 ID
+            if (pMsg->message == WM_ACTIVATE) {
+                Log("[CallWndProc] WM_ACTIVATE hwnd=%p, wParam=%p, lParam=%p, pid=%lu\n",
+                    pMsg->hwnd, (void*)pMsg->wParam, (void*)pMsg->lParam, pid);
+            } else if (pMsg->message == WM_SETFOCUS) {
+                Log("[CallWndProc] WM_SETFOCUS hwnd=%p, pid=%lu\n", pMsg->hwnd, pid);
+            } else if (pMsg->message == WM_KILLFOCUS) {
+                Log("[CallWndProc] WM_KILLFOCUS hwnd=%p, pid=%lu\n", pMsg->hwnd, pid);
+            } else if (pMsg->message == WM_WINDOWPOSCHANGING) {
+                WINDOWPOS* wp = (WINDOWPOS*)pMsg->lParam;
+                Log("[CallWndProc] WM_WINDOWPOSCHANGING hwnd=%p, flags=0x%x, insertAfter=%p, pid=%lu\n",
+                    pMsg->hwnd, wp->flags, wp->hwndInsertAfter, pid);
+            }
         }
     }
     return CallNextHookEx(g_hCallWndProcHook, nCode, wParam, lParam);
