@@ -467,7 +467,13 @@ static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam) {
             return 1;
         }
 
-        // 用友：记录时间戳，让 MinHook 处理（不在 CBT 中阻止）
+        // 阻止用友在 Alt+Tab 期间激活自己的窗口（用友通过 HCBT_ACTIVATE 直接激活，不走 MinHook API）
+        if ((altDown || altRecent) && isYonyou) {
+            Log("[CbtProc] BLOCKED Yonyou activation during Alt+Tab!\n");
+            return 1;
+        }
+
+        // 离开用友时刷新时间戳，让 MinHook 阻止用友的 SetForegroundWindow 调用
         if ((altDown || altRecent) && yonyouFocused && !isYonyou) {
             Log("[CbtProc] Yonyou leaving detected, refreshing timestamp for MinHook\n");
             RecordAltPress();
