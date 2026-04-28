@@ -45,40 +45,40 @@ static bool IsKDSReport(HWND hwnd)
 
 static bool IsYonyou(HWND hwnd)
 {
-    if (!hwnd) return false;
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
 
-    // 检查窗口类名
-    wchar_t className[256];
-    GetClassNameW(hwnd, className, sizeof(className) / sizeof(className[0]));
+    wchar_t className[256] = {0};
+    int len = GetClassNameW(hwnd, className, ARRAYSIZE(className));
+    if (len == 0)
+        return false;
+
     if (wcscmp(className, L"ThunderRT6FormDC") != 0)
         return false;
 
-    // 检查进程名
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (!pid) return false;
 
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!hProcess) return false;
 
-    PROCESSENTRY32W pe;
-    pe.dwSize = sizeof(pe);
+    wchar_t processPath[MAX_PATH] = {0};
+    DWORD pathLen = MAX_PATH;
     bool found = false;
 
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (pe.th32ProcessID == pid) {
-                wchar_t name[MAX_PATH];
-                int i = 0;
-                for (i = 0; pe.szExeFile[i]; i++)
-                    name[i] = (wchar_t)towlower(pe.szExeFile[i]);
-                name[i] = 0;
-                found = (wcscmp(name, L"enterpriseportal.exe") == 0);
-                break;
-            }
-        } while (Process32NextW(snap, &pe));
+    if (QueryFullProcessImageNameW(hProcess, 0, processPath, &pathLen))
+    {
+        wchar_t lowerPath[MAX_PATH] = {0};
+        for (DWORD i = 0; i < pathLen && i < MAX_PATH - 1; i++)
+            lowerPath[i] = (wchar_t)towlower(processPath[i]);
+        lowerPath[pathLen] = 0;
+
+        if (wcsstr(lowerPath, L"enterpriseportal.exe") != NULL)
+            found = true;
     }
-    CloseHandle(snap);
+
+    CloseHandle(hProcess);
     return found;
 }
 
@@ -114,20 +114,15 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                 HWND hwnd = GetForegroundWindow();
                 if (IsYonyou(hwnd))
                 {
-                    INPUT inputs[4] = {};
-                    inputs[0].type = INPUT_KEYBOARD;
-                    inputs[0].ki.wVk = VK_TAB;
-                    inputs[1].type = INPUT_KEYBOARD;
-                    inputs[1].ki.wVk = VK_TAB;
-                    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-                    inputs[2].type = INPUT_KEYBOARD;
-                    inputs[2].ki.wVk = VK_TAB;
-                    inputs[3].type = INPUT_KEYBOARD;
-                    inputs[3].ki.wVk = VK_TAB;
-                    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-                    SendInput(4, inputs, sizeof(INPUT));
+                    INPUT input = {};
+                    input.type = INPUT_KEYBOARD;
+                    input.ki.wVk = VK_TAB;
+                    SendInput(1, &input, sizeof(INPUT));
 
-                    return 1;
+                    input.ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(1, &input, sizeof(INPUT));
+
+                    return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
                 }
             }
         }
