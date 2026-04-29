@@ -11,6 +11,7 @@ HHOOK g_hook = NULL;
 static HMODULE g_hMod = NULL;
 static HHOOK g_kbHook = NULL;
 static bool g_realAltDown = false;
+static bool g_yonyouHandling = false;
 
 static bool GetProcessName(DWORD pid, wchar_t* name, int maxLen)
 {
@@ -88,11 +89,15 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                 HWND fgWnd = GetForegroundWindow();
                 if (IsYonyouWindow(fgWnd))
                 {
+                    g_yonyouHandling = true;
+
                     INPUT inputs[1] = {};
                     inputs[0].type = INPUT_KEYBOARD;
                     inputs[0].ki.wVk = VK_TAB;
 
                     SendInput(1, inputs, sizeof(INPUT));
+
+                    g_yonyouHandling = false;
                 }
             }
         }
@@ -102,7 +107,7 @@ static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 
 static LRESULT CALLBACK CbtProc(int code, WPARAM wParam, LPARAM lParam)
 {
-    if (code == HCBT_ACTIVATE)
+    if (code == HCBT_ACTIVATE && !g_yonyouHandling)
     {
         HWND hwnd = (HWND)wParam;
         bool altDown = ((GetAsyncKeyState(VK_LMENU) & 0x8000) != 0)
@@ -158,5 +163,6 @@ extern "C" HOOKDLL_API BOOL UninstallHook()
     }
 
     g_realAltDown = false;
+    g_yonyouHandling = false;
     return ok;
 }
